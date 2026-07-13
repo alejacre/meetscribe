@@ -104,6 +104,6 @@ struct SettingsView: View {
     }
 
     private func abbreviated(_ path: String) -> String {
-        path.hasPrefix(NSHomeDirectory()) ? "~" + path.dropFirst(NSHomeDirectory().count) : path
+        (path as NSString).abbreviatingWithTildeInPath
     }
 }

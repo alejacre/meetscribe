@@ -2,7 +2,7 @@ import Foundation
 
 enum AppPhase: Equatable {
     case idle
-    case recording(start: Date)
+    case recording
 }
 
 @MainActor

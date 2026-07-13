@@ -17,7 +17,7 @@ struct MeetScribeApp: App {
             case .idle:
                 Button("Start recording") { Task { await coordinator.startRecording() } }
             case .recording:
-                Button("Stop recording (\(elapsed(state.elapsedSeconds)))") {
+                Button("Stop recording (\(TranscriptFormatter.hms(Double(state.elapsedSeconds))))") {
                     Task { await coordinator.stopRecording() }
                 }
             }
@@ -33,15 +33,12 @@ struct MeetScribeApp: App {
             if !state.recentRecordings.isEmpty {
                 Menu("Recent recordings") {
                     ForEach(state.recentRecordings, id: \.self) { url in
+                        let rec = RecordingSession(existingFolder: url, start: Date())
                         Menu(url.lastPathComponent) {
-                            Button("Open transcript") {
-                                NSWorkspace.shared.open(url.appendingPathComponent("transcript.md"))
-                            }
-                            .disabled(!FileManager.default.fileExists(
-                                atPath: url.appendingPathComponent("transcript.md").path))
-                            Button("Play audio") {
-                                NSWorkspace.shared.open(url.appendingPathComponent("audio.m4a"))
-                            }
+                            Button("Open transcript") { NSWorkspace.shared.open(rec.transcriptMD) }
+                                .disabled(!FileManager.default.fileExists(atPath: rec.transcriptMD.path))
+                            Button("Play audio") { NSWorkspace.shared.open(rec.mixURL) }
+                                .disabled(!FileManager.default.fileExists(atPath: rec.mixURL.path))
                             Button("Show in Finder") { NSWorkspace.shared.open(url) }
                         }
                     }
@@ -74,7 +71,4 @@ struct MeetScribeApp: App {
         }
     }
 
-    private func elapsed(_ seconds: Int) -> String {
-        String(format: "%02d:%02d", seconds / 60, seconds % 60)
-    }
 }

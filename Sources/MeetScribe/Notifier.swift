@@ -36,11 +36,6 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
             UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
 
-    /// Same as notify, callable from background tasks (UNUserNotificationCenter is thread-safe).
-    func notifyAsync(title: String, body: String, category: String, userInfo: [String: String] = [:]) async {
-        notify(title: title, body: body, category: category, userInfo: userInfo)
-    }
-
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
         switch response.actionIdentifier {

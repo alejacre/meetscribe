@@ -24,6 +24,10 @@ enum ClaudeCleaner {
         let topicSlug: String?
     }
 
+    /// Resolved once per app run  -  the binary's location can't change mid-session and
+    /// the login-shell fallback is expensive (sources the full zsh profile).
+    static let resolvedBinary: String? = findBinary()
+
     /// Locates the claude CLI: fixed candidates first, then the user's login shell PATH
     /// (covers version-managed installs like mise/nvm whose paths change across upgrades).
     static func findBinary() -> String? {
@@ -42,7 +46,7 @@ enum ClaudeCleaner {
     /// Returns cleaned markdown + topic slug, or nil if claude is unavailable/fails
     /// (caller falls back to the raw transcript).
     static func clean(_ markdown: String) -> Result? {
-        guard let bin = findBinary() else { return nil }
+        guard let bin = resolvedBinary else { return nil }
         let raw = try? Subprocess.run(bin, ["-p", prompt], stdin: markdown)
         guard let raw, raw.contains("# Meeting transcript") else { return nil }
         let (slug, body) = extractTopic(raw)
@@ -54,11 +58,9 @@ enum ClaudeCleaner {
         var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
         guard let first = lines.first?.trimmingCharacters(in: .whitespaces),
               first.hasPrefix("<!-- topic:"), first.hasSuffix("-->") else { return (nil, text) }
-        let slug = first.dropFirst("<!-- topic:".count).dropLast("-->".count)
-            .trimmingCharacters(in: .whitespaces)
-            .lowercased()
-            .replacingOccurrences(of: " ", with: "-")
-            .filter { $0.isLetter || $0.isNumber || $0 == "-" }
+        let slug = RecordingSession.slug(
+            first.dropFirst("<!-- topic:".count).dropLast("-->".count)
+                .trimmingCharacters(in: .whitespaces))
         lines.removeFirst()
         let body = lines.joined(separator: "\n").trimmingCharacters(in: .newlines) + "\n"
         return (slug.isEmpty ? nil : String(slug), body)

@@ -52,8 +52,8 @@ final class RecordingCoordinator: ObservableObject {
             try await r.start(session: s)
             recorder = r
             session = s
-            let start = Date()
-            state.phase = .recording(start: start)
+            let start = s.start
+            state.phase = .recording
             state.elapsedSeconds = 0
             // .common mode: keep ticking while the menu is open (menu tracking pauses default-mode timers)
             let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
@@ -113,28 +113,22 @@ final class RecordingCoordinator: ObservableObject {
         Task.detached(priority: .utility) { [weak self] in
             do {
                 let t = Transcriber(mlxWhisperPath: settings.mlxWhisperPath, model: settings.whisperModel)
-                let mic = FileManager.default.fileExists(atPath: s.micURL.path) ? try t.transcribe(s.micURL) : []
-                let sys = FileManager.default.fileExists(atPath: s.systemURL.path) ? try t.transcribe(s.systemURL) : []
+                let tracks = try t.transcribe([s.micURL, s.systemURL])
+                let (mic, sys) = (tracks[0], tracks[1])
 
                 let raw = try JSONEncoder().encode(["mic": mic, "system": sys])
-                try raw.write(to: s.transcriptJSON)
-                // mlx_whisper side-products, already consolidated into transcript.json
-                for name in ["mic.json", "system.json"] {
-                    try? FileManager.default.removeItem(at: s.folder.appendingPathComponent(name))
-                }
+                try raw.write(to: s.transcriptJSON, options: .atomic)
 
                 let dur = max(mic.last?.end ?? 0, sys.last?.end ?? 0)
-                let fmt = DateFormatter()
-                fmt.dateFormat = "yyyy-MM-dd HH:mm"
                 var md = TranscriptFormatter.format(mic: mic, system: sys, header: .init(
-                    date: fmt.string(from: s.start),
-                    app: s.folder.lastPathComponent.components(separatedBy: "_").last ?? "manual",
+                    date: RecordingSession.headerDateFormatter.string(from: s.start),
+                    app: s.appName ?? s.folder.lastPathComponent.components(separatedBy: "_").last ?? "manual",
                     duration: TranscriptFormatter.hms(dur),
                     model: settings.whisperModel, cleanedByClaude: false))
                 try md.write(to: s.transcriptMD, atomically: true, encoding: .utf8)
-                await notifier.notifyAsync(title: "Transcript ready",
-                                           body: s.folder.lastPathComponent, category: "MEETING_END",
-                                           userInfo: ["folder": s.folder.path])
+                notifier.notify(title: "Transcript ready",
+                                body: s.folder.lastPathComponent, category: "MEETING_END",
+                                userInfo: ["folder": s.folder.path])
 
                 if settings.claudeCleanupEnabled, let result = ClaudeCleaner.clean(md) {
                     md = result.markdown
@@ -149,15 +143,15 @@ final class RecordingCoordinator: ObservableObject {
                             finalFolder = dest
                         }
                     }
-                    await notifier.notifyAsync(title: "Transcript cleaned by Claude",
-                                               body: finalFolder.lastPathComponent, category: "MEETING_END",
-                                               userInfo: ["folder": finalFolder.path])
+                    notifier.notify(title: "Transcript cleaned by Claude",
+                                    body: finalFolder.lastPathComponent, category: "MEETING_END",
+                                    userInfo: ["folder": finalFolder.path])
                 }
             } catch {
-                await notifier.notifyAsync(title: "Transcription failed",
-                                           body: "Audio is safe. Retry? (\(error.localizedDescription))",
-                                           category: "TRANSCRIBE_FAILED",
-                                           userInfo: ["folder": s.folder.path])
+                notifier.notify(title: "Transcription failed",
+                                body: "Audio is safe. Retry? (\(error.localizedDescription))",
+                                category: "TRANSCRIBE_FAILED",
+                                userInfo: ["folder": s.folder.path])
             }
             await MainActor.run { [weak self] in
                 self?.state.transcribingCount -= 1

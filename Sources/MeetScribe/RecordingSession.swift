@@ -3,21 +3,41 @@ import Foundation
 struct RecordingSession: Sendable {
     let folder: URL
     let start: Date
+    let appName: String?
 
-    init(root: URL, start: Date, appName: String?) {
-        self.start = start
+    static let stampFormatter: DateFormatter = {
         let fmt = DateFormatter()
         fmt.dateFormat = "yyyy-MM-dd_HH-mm"
         fmt.locale = Locale(identifier: "en_US_POSIX")
-        let app = (appName ?? "manual")
-            .lowercased()
+        return fmt
+    }()
+
+    static let headerDateFormatter: DateFormatter = {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd HH:mm"
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        return fmt
+    }()
+
+    /// Lowercased, hyphen-separated, filesystem-safe slug shared by folder naming
+    /// and Claude topic slugs.
+    static func slug(_ text: String) -> String {
+        text.lowercased()
             .replacingOccurrences(of: " ", with: "-")
-        self.folder = root.appendingPathComponent("\(fmt.string(from: start))_\(app)")
+            .filter { $0.isLetter || $0.isNumber || $0 == "-" }
+    }
+
+    init(root: URL, start: Date, appName: String?) {
+        self.start = start
+        self.appName = appName
+        let stamp = Self.stampFormatter.string(from: start)
+        self.folder = root.appendingPathComponent("\(stamp)_\(Self.slug(appName ?? "manual"))")
     }
 
     init(existingFolder: URL, start: Date) {
         self.folder = existingFolder
         self.start = start
+        self.appName = nil
     }
 
     var micURL: URL { folder.appendingPathComponent("mic.m4a") }

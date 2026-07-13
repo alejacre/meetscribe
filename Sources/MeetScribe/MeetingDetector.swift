@@ -36,8 +36,6 @@ final class MeetingDetector {
         timer = t
     }
 
-    func stopPolling() { timer?.invalidate(); timer = nil }
-
     private func poll() {
         var meeting = Self.appsUsingMicrophone().first
         // Zoom holds the microphone after the meeting ends; its CptHost helper

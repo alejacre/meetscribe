@@ -51,17 +51,18 @@ final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
               let pcm = sampleBuffer.asPCMBuffer else { return }
         do {
             switch type {
-            case .microphone:
-                if micFile == nil { micFile = try makeFile(url: session.micURL, format: pcm.format) }
-                try micFile?.write(from: pcm)
-            case .audio:
-                if systemFile == nil { systemFile = try makeFile(url: session.systemURL, format: pcm.format) }
-                try systemFile?.write(from: pcm)
+            case .microphone: try append(pcm, to: &micFile, url: session.micURL)
+            case .audio: try append(pcm, to: &systemFile, url: session.systemURL)
             default: break
             }
         } catch {
             sourceWarning = "A capture source failed: \(error.localizedDescription)"
         }
+    }
+
+    private func append(_ pcm: AVAudioPCMBuffer, to file: inout AVAudioFile?, url: URL) throws {
+        if file == nil { file = try makeFile(url: url, format: pcm.format) }
+        try file?.write(from: pcm)
     }
 
     private func makeFile(url: URL, format: AVAudioFormat) throws -> AVAudioFile {
