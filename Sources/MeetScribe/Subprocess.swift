@@ -8,6 +8,12 @@ enum Subprocess {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: executable)
         p.arguments = args
+        // Apps launched from Finder get a minimal PATH; tools like mlx_whisper
+        // shell out to ffmpeg and need Homebrew/user paths visible.
+        var env = ProcessInfo.processInfo.environment
+        let extra = ["/opt/homebrew/bin", "/usr/local/bin", NSHomeDirectory() + "/.local/bin"]
+        env["PATH"] = (extra + [(env["PATH"] ?? "/usr/bin:/bin")]).joined(separator: ":")
+        p.environment = env
         let out = Pipe(), err = Pipe()
         p.standardOutput = out
         p.standardError = err
