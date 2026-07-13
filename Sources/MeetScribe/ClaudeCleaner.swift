@@ -6,9 +6,23 @@ enum ClaudeCleaner {
     remove filler words (um, eh, vale vale, you know) and false starts, and merge fragments into \
     coherent paragraphs. STRICT RULES: keep every [hh:mm:ss] timestamp and every **Me:**/**Them:** \
     label exactly as-is; keep each language (Spanish/English) as spoken  -  do not translate; do not \
-    summarize, reorder, or omit content; keep the markdown header untouched. Output ONLY the cleaned \
-    markdown, no commentary.
+    summarize, reorder, or omit content in the transcript body; keep the markdown header untouched.
+
+    Additionally:
+    1. The FIRST line of your output must be exactly: <!-- topic: <slug> --> where <slug> is 1-3 \
+    lowercase words joined by hyphens describing what the meeting is about (e.g. q3-budget-review, \
+    incident-triage, standup). Use the transcript's main language for the slug.
+    2. Right after the header's --- separator, insert a "## Summary" section: 2-4 sentences \
+    describing what was discussed and any decisions or action items, in the transcript's main language.
+    3. Then a "## Transcript" heading followed by the cleaned transcript body.
+
+    Output ONLY the markdown, no commentary.
     """
+
+    struct Result {
+        let markdown: String
+        let topicSlug: String?
+    }
 
     /// Locates the claude CLI: fixed candidates first, then the user's login shell PATH
     /// (covers version-managed installs like mise/nvm whose paths change across upgrades).
@@ -25,11 +39,28 @@ enum ClaudeCleaner {
         return path
     }
 
-    /// Returns cleaned markdown, or nil if claude is unavailable/fails (caller falls back to raw).
-    static func clean(_ markdown: String) -> String? {
+    /// Returns cleaned markdown + topic slug, or nil if claude is unavailable/fails
+    /// (caller falls back to the raw transcript).
+    static func clean(_ markdown: String) -> Result? {
         guard let bin = findBinary() else { return nil }
-        let result = try? Subprocess.run(bin, ["-p", prompt], stdin: markdown)
-        guard let result, result.contains("# Meeting transcript") else { return nil }
-        return result
+        let raw = try? Subprocess.run(bin, ["-p", prompt], stdin: markdown)
+        guard let raw, raw.contains("# Meeting transcript") else { return nil }
+        let (slug, body) = extractTopic(raw)
+        return Result(markdown: body, topicSlug: slug)
+    }
+
+    /// Parses the leading `<!-- topic: slug -->` line; returns (slug, markdown without that line).
+    static func extractTopic(_ text: String) -> (String?, String) {
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        guard let first = lines.first?.trimmingCharacters(in: .whitespaces),
+              first.hasPrefix("<!-- topic:"), first.hasSuffix("-->") else { return (nil, text) }
+        let slug = first.dropFirst("<!-- topic:".count).dropLast("-->".count)
+            .trimmingCharacters(in: .whitespaces)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "-")
+            .filter { $0.isLetter || $0.isNumber || $0 == "-" }
+        lines.removeFirst()
+        let body = lines.joined(separator: "\n").trimmingCharacters(in: .newlines) + "\n"
+        return (slug.isEmpty ? nil : String(slug), body)
     }
 }

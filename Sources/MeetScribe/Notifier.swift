@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import UserNotifications
 
 final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
@@ -44,6 +45,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
         case "RETRY":
             if let path = response.notification.request.content.userInfo["folder"] as? String {
                 onRetryAction?(URL(fileURLWithPath: path))
+            }
+        case UNNotificationDefaultActionIdentifier:
+            // Tap on the notification body: reveal the recording folder if it has one.
+            if let path = response.notification.request.content.userInfo["folder"] as? String {
+                NSWorkspace.shared.open(URL(fileURLWithPath: path, isDirectory: true))
             }
         default: break
         }

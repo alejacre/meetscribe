@@ -60,7 +60,8 @@ final class RecordingCoordinator: ObservableObject {
                 }
             }
             notifier.notify(title: "Recording started",
-                            body: s.folder.lastPathComponent, category: "MEETING_END")
+                            body: s.folder.lastPathComponent, category: "MEETING_END",
+                            userInfo: ["folder": s.folder.path])
         } catch {
             state.lastError = "Could not start recording: \(error.localizedDescription)"
             notifier.notify(title: "Recording failed to start",
@@ -117,13 +118,25 @@ final class RecordingCoordinator: ObservableObject {
                     model: settings.whisperModel, cleanedByClaude: false))
                 try md.write(to: s.transcriptMD, atomically: true, encoding: .utf8)
                 await notifier.notifyAsync(title: "Transcript ready",
-                                           body: s.folder.lastPathComponent, category: "MEETING_END")
+                                           body: s.folder.lastPathComponent, category: "MEETING_END",
+                                           userInfo: ["folder": s.folder.path])
 
-                if settings.claudeCleanupEnabled, let polished = ClaudeCleaner.clean(md) {
-                    md = polished
+                if settings.claudeCleanupEnabled, let result = ClaudeCleaner.clean(md) {
+                    md = result.markdown
                     try md.write(to: s.transcriptMD, atomically: true, encoding: .utf8)
+                    // Rename folder to <date>_<time>_<topic> now that we know the topic.
+                    var finalFolder = s.folder
+                    if let slug = result.topicSlug {
+                        let stamp = s.folder.lastPathComponent.split(separator: "_").prefix(2).joined(separator: "_")
+                        let dest = s.folder.deletingLastPathComponent().appendingPathComponent("\(stamp)_\(slug)")
+                        if dest != s.folder, !FileManager.default.fileExists(atPath: dest.path),
+                           (try? FileManager.default.moveItem(at: s.folder, to: dest)) != nil {
+                            finalFolder = dest
+                        }
+                    }
                     await notifier.notifyAsync(title: "Transcript cleaned by Claude",
-                                               body: s.folder.lastPathComponent, category: "MEETING_END")
+                                               body: finalFolder.lastPathComponent, category: "MEETING_END",
+                                               userInfo: ["folder": finalFolder.path])
                 }
             } catch {
                 await notifier.notifyAsync(title: "Transcription failed",
