@@ -19,7 +19,7 @@ macOS menu bar app that records meeting audio (Zoom, Slack huddles, Chime, Teams
 ### 1. AudioRecorder
 - Captures **system audio** (what the user hears) via ScreenCaptureKit audio-only capture.
 - Captures **microphone** (what the user says) via AVAudioEngine.
-- Mixes both streams in real time into a single `audio.m4a` (AAC, 48 kHz, mono or stereo  -  implementer's choice, favor smaller files).
+- Writes three files in real time: `audio.m4a` (mixed, for listening), `mic.m4a` (user's voice only), `system.m4a` (everyone else only). AAC, 48 kHz, favor smaller files.
 - Required permissions (requested on first use): Screen/System Audio Recording, Microphone.
 - Must be resilient: if one source fails mid-recording, keep recording the other and surface a warning.
 
@@ -31,12 +31,14 @@ macOS menu bar app that records meeting audio (Zoom, Slack huddles, Chime, Teams
 - Detection is a suggestion layer only  -  manual record/stop from the menu always works regardless.
 
 ### 3. Transcriber
-- Runs after recording stops, as a subprocess: `mlx_whisper audio.m4a --output-format json ...` with automatic language detection (user works in ES and EN).
+- Runs after recording stops: transcribes `mic.m4a` and `system.m4a` separately with `mlx_whisper` (subprocess, JSON output, automatic language detection  -  user works in ES and EN).
 - Whisper model configurable in Settings (default: a good quality/speed tradeoff, e.g. `mlx-community/whisper-large-v3-turbo`).
-- Post-processes whisper JSON into `transcript.md`:
+- **Speaker attribution by track:** mic segments are labeled **Me**, system segments **Them**  -  no ML diarization needed; the physical track split is the ground truth. Segments from both tracks are interleaved by start timestamp.
+- Merges into `transcript.md`:
   - Header: date, detected meeting app, duration, model used.
-  - Body: paragraphs grouped by speech pauses, each with `[hh:mm:ss]` timestamp.
-- Keeps raw segments as `transcript.json`.
+  - Body: turns grouped by speaker and speech pauses, each as `[hh:mm:ss] **Me/Them:** text`.
+- Keeps raw segments of both tracks as `transcript.json`.
+- **Cleanup pass with Claude:** after whisper finishes, runs the `claude` CLI headless (`claude -p`) over the raw transcript to produce the final `transcript.md`: fixes punctuation and casing, removes filler words and false starts, merges fragments into coherent paragraphs, preserves `[hh:mm:ss]` timestamps, **Me/Them** labels, and both languages (ES/EN) as spoken  -  no summarizing, no content changes. Configurable on/off in Settings (default on). If `claude` is unavailable or fails, fall back to the whisper-only formatted transcript and note it in the file header.
 - If transcription fails, audio is already safe on disk; notification offers "Retry transcription". Retry also available from the recording's entry in the menu.
 
 ### 4. MenuBarUI
@@ -57,9 +59,11 @@ macOS menu bar app that records meeting audio (Zoom, Slack huddles, Chime, Teams
 
 ```
 <output-folder>/2026-07-13_15-30_zoom/
-├── audio.m4a          # raw mixed recording
-├── transcript.md      # formatted transcript
-└── transcript.json    # raw whisper segments
+├── audio.m4a          # mixed recording (for listening)
+├── mic.m4a            # user's voice track
+├── system.m4a         # everyone else's track
+├── transcript.md      # formatted transcript with Me/Them attribution
+└── transcript.json    # raw whisper segments (both tracks)
 ```
 
 Folder name: `YYYY-MM-DD_HH-mm_<app>` where `<app>` is the detected meeting app, or `manual` if recording was started by hand with no detection.
@@ -75,7 +79,7 @@ Folder name: `YYYY-MM-DD_HH-mm_<app>` where `<app>` is the detected meeting app,
 
 ## Non-goals (v1)
 
-- Speaker diarization / separate "me" vs "them" tracks (single mixed track chosen explicitly).
+- ML speaker diarization (distinguishing individual remote speakers within "Them"). Track-based Me/Them attribution is in scope; per-person identification is not.
 - Auto-record without confirmation.
 - Summary generation, calendar integration, cloud upload.
 
