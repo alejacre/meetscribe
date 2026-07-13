@@ -28,18 +28,25 @@ final class MeetingDetector {
     private var timer: Timer?
     private var current: DetectedMeeting?
 
-    func startPolling(interval: TimeInterval = 3) {
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+    func startPolling(interval: TimeInterval = 1.5) {
+        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             self?.poll()
         }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     func stopPolling() { timer?.invalidate(); timer = nil }
 
     private func poll() {
-        let meeting = Self.appsUsingMicrophone().first
+        var meeting = Self.appsUsingMicrophone().first
+        // Zoom holds the microphone after the meeting ends; its CptHost helper
+        // only runs during an actual meeting, so use that as the end signal.
+        if let m = meeting, m.appName == "zoom", !Self.zoomMeetingHelperRunning() {
+            meeting = nil
+        }
         if meeting != current {
-            logger.info("mic usage changed: \(meeting?.appName ?? "none", privacy: .public) (was \(self.current?.appName ?? "none", privacy: .public))")
+            logger.info("meeting state: \(meeting?.appName ?? "none", privacy: .public) (was \(self.current?.appName ?? "none", privacy: .public))")
         }
         if let meeting, meeting != current {
             current = meeting
@@ -47,6 +54,12 @@ final class MeetingDetector {
         } else if meeting == nil, let ended = current {
             current = nil
             onMeetingEnd?(ended)
+        }
+    }
+
+    static func zoomMeetingHelperRunning() -> Bool {
+        NSWorkspace.shared.runningApplications.contains {
+            $0.bundleIdentifier == "us.zoom.CptHost" || $0.localizedName == "CptHost"
         }
     }
 

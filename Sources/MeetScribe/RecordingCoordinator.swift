@@ -11,6 +11,7 @@ final class RecordingCoordinator: ObservableObject {
     private var detectedApp: String?
     private var settings = Settings()
     private var elapsedTimer: Timer?
+    private var sleepActivity: NSObjectProtocol?
 
     init(state: AppState) {
         self.state = state
@@ -62,6 +63,9 @@ final class RecordingCoordinator: ObservableObject {
             }
             RunLoop.main.add(timer, forMode: .common)
             elapsedTimer = timer
+            sleepActivity = ProcessInfo.processInfo.beginActivity(
+                options: [.idleSystemSleepDisabled],
+                reason: "MeetScribe is recording a meeting")
             notifier.notify(title: "Recording started",
                             body: s.folder.lastPathComponent, category: "MEETING_END",
                             userInfo: ["folder": s.folder.path])
@@ -76,6 +80,10 @@ final class RecordingCoordinator: ObservableObject {
         guard case .recording = state.phase, let r = recorder, let s = session else { return }
         elapsedTimer?.invalidate()
         elapsedTimer = nil
+        if let activity = sleepActivity {
+            ProcessInfo.processInfo.endActivity(activity)
+            sleepActivity = nil
+        }
         state.phase = .idle
         recorder = nil
         session = nil
@@ -110,6 +118,10 @@ final class RecordingCoordinator: ObservableObject {
 
                 let raw = try JSONEncoder().encode(["mic": mic, "system": sys])
                 try raw.write(to: s.transcriptJSON)
+                // mlx_whisper side-products, already consolidated into transcript.json
+                for name in ["mic.json", "system.json"] {
+                    try? FileManager.default.removeItem(at: s.folder.appendingPathComponent(name))
+                }
 
                 let dur = max(mic.last?.end ?? 0, sys.last?.end ?? 0)
                 let fmt = DateFormatter()

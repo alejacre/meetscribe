@@ -33,14 +33,34 @@ struct MeetScribeApp: App {
             if !state.recentRecordings.isEmpty {
                 Menu("Recent recordings") {
                     ForEach(state.recentRecordings, id: \.self) { url in
-                        Button(url.lastPathComponent) { NSWorkspace.shared.open(url) }
+                        Menu(url.lastPathComponent) {
+                            Button("Open transcript") {
+                                NSWorkspace.shared.open(url.appendingPathComponent("transcript.md"))
+                            }
+                            .disabled(!FileManager.default.fileExists(
+                                atPath: url.appendingPathComponent("transcript.md").path))
+                            Button("Play audio") {
+                                NSWorkspace.shared.open(url.appendingPathComponent("audio.m4a"))
+                            }
+                            Button("Show in Finder") { NSWorkspace.shared.open(url) }
+                        }
                     }
                 }
             }
             Button("Open recordings folder") { NSWorkspace.shared.open(Settings().outputFolder) }
             Divider()
             SettingsLink { Text("Settings…") }
-            Button("Quit MeetScribe") { NSApplication.shared.terminate(nil) }.keyboardShortcut("q")
+            Button("Quit MeetScribe") {
+                // Don't lose an in-flight recording: stop and save before exiting.
+                if case .recording = state.phase {
+                    Task {
+                        await coordinator.stopRecording()
+                        NSApplication.shared.terminate(nil)
+                    }
+                } else {
+                    NSApplication.shared.terminate(nil)
+                }
+            }.keyboardShortcut("q")
         } label: {
             Image(systemName: iconName)
         }

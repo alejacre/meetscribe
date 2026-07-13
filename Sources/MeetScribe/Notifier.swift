@@ -28,6 +28,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
         content.body = body
         content.categoryIdentifier = category
         content.userInfo = userInfo
+        // Meeting start/end prompts are actionable right now  -  break through Focus modes.
+        if category == "MEETING_START" || category == "MEETING_END" {
+            content.interruptionLevel = .timeSensitive
+        }
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
