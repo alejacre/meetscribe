@@ -1,4 +1,5 @@
 import SwiftUI
+import ServiceManagement
 
 struct SettingsView: View {
     @State private var settings = Settings()
@@ -6,6 +7,8 @@ struct SettingsView: View {
     @State private var model = ""
     @State private var whisperPath = ""
     @State private var cleanup = true
+    @State private var hotKeyOn = true
+    @State private var launchAtLogin = false
 
     private static let models = [
         "mlx-community/whisper-large-v3-turbo",
@@ -74,6 +77,23 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("General") {
+                Toggle("Global shortcut \(HotKey.comboDescription) to start/stop recording", isOn: $hotKeyOn)
+                    .onChange(of: hotKeyOn) { _, v in
+                        settings.hotKeyEnabled = v
+                        NotificationCenter.default.post(name: RecordingCoordinator.hotKeySettingChanged, object: nil)
+                    }
+                Toggle("Start MeetScribe at login", isOn: $launchAtLogin)
+                    .onChange(of: launchAtLogin) { _, v in
+                        do {
+                            if v { try SMAppService.mainApp.register() }
+                            else { try SMAppService.mainApp.unregister() }
+                        } catch {
+                            launchAtLogin = SMAppService.mainApp.status == .enabled
+                        }
+                    }
+            }
+
             Section("Meetings") {
                 Text("MeetScribe watches for Zoom, Slack, Chime, Teams, FaceTime and WebEx using the microphone, offers to record when a meeting starts, and stops automatically when it ends.")
                     .font(.caption)
@@ -88,6 +108,8 @@ struct SettingsView: View {
             model = settings.whisperModel
             whisperPath = settings.mlxWhisperPath
             cleanup = settings.claudeCleanupEnabled
+            hotKeyOn = settings.hotKeyEnabled
+            launchAtLogin = SMAppService.mainApp.status == .enabled
         }
     }
 

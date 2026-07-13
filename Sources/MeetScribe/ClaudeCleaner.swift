@@ -36,7 +36,7 @@ enum ClaudeCleaner {
         if let hit = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
             return hit
         }
-        guard let path = try? Subprocess.run("/bin/zsh", ["-lc", "which claude"])
+        guard let path = try? Subprocess.run("/bin/zsh", ["-lc", "which claude"], timeout: 30)
             .trimmingCharacters(in: .whitespacesAndNewlines),
               !path.isEmpty, FileManager.default.isExecutableFile(atPath: path)
         else { return nil }
@@ -47,7 +47,7 @@ enum ClaudeCleaner {
     /// (caller falls back to the raw transcript).
     static func clean(_ markdown: String) -> Result? {
         guard let bin = resolvedBinary else { return nil }
-        let raw = try? Subprocess.run(bin, ["-p", prompt], stdin: markdown)
+        let raw = try? Subprocess.run(bin, ["-p", prompt], stdin: markdown, timeout: 300)
         guard let raw, raw.contains("# Meeting transcript") else { return nil }
         let (slug, body) = extractTopic(raw)
         return Result(markdown: body, topicSlug: slug)

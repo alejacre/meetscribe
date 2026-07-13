@@ -83,6 +83,23 @@ enum TranscriptFormatter {
         return out
     }
 
+    /// Flips the header's Cleanup line after Claude cleanup (the prompt forbids
+    /// Claude itself from editing the header).
+    static func markCleaned(_ markdown: String) -> String {
+        markdown.replacingOccurrences(of: "- Cleanup: not cleaned (raw whisper)",
+                                      with: "- Cleanup: cleaned by Claude")
+    }
+
+    /// Extracts the body of the "## Summary" section (added by Claude cleanup),
+    /// or nil if the transcript has none.
+    static func extractSummary(_ markdown: String) -> String? {
+        guard let range = markdown.range(of: "## Summary") else { return nil }
+        let after = markdown[range.upperBound...]
+        let body = after.range(of: "\n## ").map { after[..<$0.lowerBound] } ?? after
+        let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
     static func hms(_ seconds: Double) -> String {
         let s = Int(seconds)
         return String(format: "%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)

@@ -12,6 +12,9 @@ final class RecordingCoordinator: ObservableObject {
     private var settings = Settings()
     private var elapsedTimer: Timer?
     private var sleepActivity: NSObjectProtocol?
+    private var hotKey: HotKey?
+
+    static let hotKeySettingChanged = Notification.Name("meetscribe.hotKeySettingChanged")
 
     init(state: AppState) {
         self.state = state
@@ -38,20 +41,51 @@ final class RecordingCoordinator: ObservableObject {
             }
         }
         detector.startPolling()
+        hotKey = HotKey { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                switch self.state.phase {
+                case .idle: await self.startRecording()
+                case .recording: await self.stopRecording()
+                }
+            }
+        }
+        applyHotKeySetting()
+        NotificationCenter.default.addObserver(forName: Self.hotKeySettingChanged,
+                                               object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.applyHotKeySetting() }
+        }
         refreshRecent()
+    }
+
+    private func applyHotKeySetting() {
+        if settings.hotKeyEnabled { hotKey?.register() } else { hotKey?.unregister() }
     }
 
     func startRecording() async {
         guard case .idle = state.phase else { return }
+        // Claim the phase BEFORE the first await: two rapid invocations would
+        // otherwise both pass the guard and spawn two recorders.
+        state.phase = .recording
         let s = RecordingSession(root: settings.outputFolder, start: Date(), appName: detectedApp)
         let r = AudioRecorder()
         do {
             try await r.start(session: s)
+            r.onStreamDied = { [weak self] error in
+                Task { @MainActor in
+                    guard let self, case .recording = self.state.phase, self.recorder === r else { return }
+                    self.notifier.notify(title: "Recording interrupted",
+                                         body: "Audio saved up to this point. (\(error.localizedDescription))",
+                                         category: "INFO", userInfo: ["folder": s.folder.path])
+                    await self.stopRecording()
+                }
+            }
             recorder = r
             session = s
             let start = s.start
-            state.phase = .recording
             state.elapsedSeconds = 0
+            state.lastError = nil
+            state.showPermissionHelp = false
             // .common mode: keep ticking while the menu is open (menu tracking pauses default-mode timers)
             let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
                 Task { @MainActor in
@@ -67,7 +101,13 @@ final class RecordingCoordinator: ObservableObject {
                             body: s.folder.lastPathComponent, category: "INFO",
                             userInfo: ["folder": s.folder.path])
         } catch {
+            state.phase = .idle
             state.lastError = "Could not start recording: \(error.localizedDescription)"
+            // SCShareableContent fails without the Screen Recording grant; surface
+            // a deep link to the right Privacy pane instead of a dead-end error.
+            state.showPermissionHelp = (error as NSError).domain == "com.apple.ScreenCaptureKit.SCStreamErrorDomain"
+                || error.localizedDescription.localizedCaseInsensitiveContains("permission")
+                || error.localizedDescription.contains("No display found")
             notifier.notify(title: "Recording failed to start",
                             body: error.localizedDescription, category: "MEETING_START")
         }
@@ -132,7 +172,9 @@ final class RecordingCoordinator: ObservableObject {
                                 userInfo: ["folder": s.folder.path])
 
                 if settings.claudeCleanupEnabled, let result = ClaudeCleaner.clean(md) {
-                    md = result.markdown
+                    // The prompt tells Claude not to touch the header, so the
+                    // Cleanup line still says "not cleaned"  -  patch it here.
+                    md = TranscriptFormatter.markCleaned(result.markdown)
                     try md.write(to: s.transcriptMD, atomically: true, encoding: .utf8)
                     // Rename folder to <date>_<time>_<topic> now that we know the topic.
                     var finalFolder = s.folder
@@ -162,6 +204,26 @@ final class RecordingCoordinator: ObservableObject {
                 self?.refreshRecent()
             }
         }
+    }
+
+    /// Quit path: stop a live recording, then wait for in-flight transcriptions
+    /// (bounded courtesy wait) before terminating.
+    func quitAfterPendingWork() async {
+        if case .recording = state.phase { await stopRecording() }
+        let deadline = Date().addingTimeInterval(300)
+        while state.transcribingCount > 0, Date() < deadline {
+            try? await Task.sleep(for: .seconds(1))
+        }
+        NSApplication.shared.terminate(nil)
+    }
+
+    func retryTranscription(folder: URL) {
+        transcribeInBackground(session: RecordingSession(existingFolder: folder, start: Date()))
+    }
+
+    func clearError() {
+        state.lastError = nil
+        state.showPermissionHelp = false
     }
 
     func refreshRecent() {

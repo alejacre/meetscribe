@@ -78,6 +78,35 @@ final class TranscriptFormatterTests: XCTestCase {
         XCTAssertEqual(filtered, [])
     }
 
+    func testMarkCleanedPatchesHeaderLine() {
+        let md = TranscriptFormatter.format(mic: [], system: [],
+                                            header: .init(date: "d", app: "a", duration: "x", model: "m", cleanedByClaude: false))
+        let patched = TranscriptFormatter.markCleaned(md)
+        XCTAssertTrue(patched.contains("- Cleanup: cleaned by Claude"))
+        XCTAssertFalse(patched.contains("not cleaned (raw whisper)"))
+    }
+
+    func testExtractSummary() {
+        let md = """
+        # Meeting transcript  -  d
+
+        ---
+
+        ## Summary
+        We discussed the Q3 budget.
+        Decision: ship in August.
+
+        ## Transcript
+        [00:00:01] **Me:** hi
+        """
+        XCTAssertEqual(TranscriptFormatter.extractSummary(md),
+                       "We discussed the Q3 budget.\nDecision: ship in August.")
+    }
+
+    func testExtractSummaryMissingReturnsNil() {
+        XCTAssertNil(TranscriptFormatter.extractSummary("# Meeting transcript\n\nno summary here"))
+    }
+
     func testEmptySegmentsSkipped() {
         let mic = [seg(0, 1, "   "), seg(2, 3, "real")]
         let md = TranscriptFormatter.format(mic: mic, system: [],

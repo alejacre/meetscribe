@@ -22,4 +22,8 @@ struct Settings: @unchecked Sendable {
         get { d.object(forKey: "claudeCleanupEnabled") as? Bool ?? true }
         set { d.set(newValue, forKey: "claudeCleanupEnabled") }
     }
+    var hotKeyEnabled: Bool {
+        get { d.object(forKey: "hotKeyEnabled") as? Bool ?? true }
+        set { d.set(newValue, forKey: "hotKeyEnabled") }
+    }
 }

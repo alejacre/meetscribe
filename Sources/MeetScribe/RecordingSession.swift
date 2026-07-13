@@ -31,7 +31,16 @@ struct RecordingSession: Sendable {
         self.start = start
         self.appName = appName
         let stamp = Self.stampFormatter.string(from: start)
-        self.folder = root.appendingPathComponent("\(stamp)_\(Self.slug(appName ?? "manual"))")
+        let base = "\(stamp)_\(Self.slug(appName ?? "manual"))"
+        // Timestamps have minute granularity: a stop+start within the same minute
+        // would silently reuse the live folder. Probe for a free name instead.
+        var candidate = root.appendingPathComponent(base)
+        var n = 2
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            candidate = root.appendingPathComponent("\(base)-\(n)")
+            n += 1
+        }
+        self.folder = candidate
     }
 
     init(existingFolder: URL, start: Date) {

@@ -37,11 +37,11 @@ final class MeetingDetector {
     }
 
     private func poll() {
-        var meeting = Self.appsUsingMicrophone().first
         // Zoom holds the microphone after the meeting ends; its CptHost helper
-        // only runs during an actual meeting, so use that as the end signal.
-        if let m = meeting, m.appName == "zoom", !Self.zoomMeetingHelperRunning() {
-            meeting = nil
+        // only runs during an actual meeting, so treat idle Zoom as no-meeting
+        // instead of letting it mask Teams/Chime also on the mic.
+        let meeting = Self.appsUsingMicrophone().first {
+            $0.appName != "zoom" || Self.zoomMeetingHelperRunning()
         }
         if meeting != current {
             logger.info("meeting state: \(meeting?.appName ?? "none", privacy: .public) (was \(self.current?.appName ?? "none", privacy: .public))")

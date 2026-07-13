@@ -9,6 +9,9 @@ final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
     private var session: RecordingSession?
     private let queue = DispatchQueue(label: "meetscribe.audio")
     private(set) var sourceWarning: String?
+    /// Fired when the capture stream dies out from under us (display sleep,
+    /// permission revoked); audio written so far stays on disk.
+    var onStreamDied: ((Error) -> Void)?
 
     func start(session: RecordingSession) async throws {
         try session.createFolder()
@@ -41,6 +44,13 @@ final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
         try await stream?.stopCapture()
         stream = nil
         queue.sync { micFile = nil; systemFile = nil } // flush/close
+    }
+
+    // MARK: SCStreamDelegate
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        guard self.stream != nil else { return } // ignore expected stop()
+        self.stream = nil
+        onStreamDied?(error)
     }
 
     // MARK: SCStreamOutput
