@@ -1,7 +1,7 @@
 import Foundation
 import UserNotifications
 
-final class Notifier: NSObject, UNUserNotificationCenterDelegate {
+final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     var onRecordAction: (() -> Void)?
     var onStopAction: (() -> Void)?
     var onRetryAction: ((URL) -> Void)?
@@ -29,6 +29,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.userInfo = userInfo
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+    }
+
+    /// Same as notify, callable from background tasks (UNUserNotificationCenter is thread-safe).
+    func notifyAsync(title: String, body: String, category: String, userInfo: [String: String] = [:]) async {
+        notify(title: title, body: body, category: category, userInfo: userInfo)
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,

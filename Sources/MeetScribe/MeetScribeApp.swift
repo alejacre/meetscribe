@@ -16,10 +16,14 @@ struct MeetScribeApp: App {
             switch state.phase {
             case .idle:
                 Button("Start recording") { Task { await coordinator.startRecording() } }
-            case .recording(let start):
-                Button("Stop recording (\(elapsed(since: start)))") { Task { await coordinator.stopRecording() } }
-            case .transcribing:
-                Text("Transcribing…")
+            case .recording:
+                Button("Stop recording (\(elapsed(state.elapsedSeconds)))") {
+                    Task { await coordinator.stopRecording() }
+                }
+            }
+            if state.transcribingCount > 0 {
+                Text(state.transcribingCount == 1 ? "Transcribing 1 recording…"
+                                                  : "Transcribing \(state.transcribingCount) recordings…")
             }
             if let err = state.lastError {
                 Divider()
@@ -45,14 +49,12 @@ struct MeetScribeApp: App {
 
     private var iconName: String {
         switch state.phase {
-        case .idle: "waveform"
-        case .recording: "record.circle.fill"
-        case .transcribing: "hourglass"
+        case .recording: return "record.circle.fill"
+        case .idle: return state.transcribingCount > 0 ? "hourglass" : "waveform"
         }
     }
 
-    private func elapsed(since start: Date) -> String {
-        let s = Int(Date().timeIntervalSince(start))
-        return String(format: "%02d:%02d", s / 60, s % 60)
+    private func elapsed(_ seconds: Int) -> String {
+        String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
 }

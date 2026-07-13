@@ -10,13 +10,16 @@ final class RecordingCoordinator: ObservableObject {
     private var session: RecordingSession?
     private var detectedApp: String?
     private var settings = Settings()
+    private var elapsedTimer: Timer?
 
     init(state: AppState) {
         self.state = state
         notifier.setup()
         notifier.onRecordAction = { [weak self] in Task { await self?.startRecording() } }
         notifier.onStopAction = { [weak self] in Task { await self?.stopRecording() } }
-        notifier.onRetryAction = { [weak self] folder in Task { await self?.retryTranscription(folder: folder) } }
+        notifier.onRetryAction = { [weak self] folder in
+            Task { @MainActor in self?.transcribeInBackground(session: RecordingSession(existingFolder: folder, start: Date())) }
+        }
         detector.onMeetingStart = { [weak self] meeting in
             Task { @MainActor in
                 guard let self, case .idle = self.state.phase else { return }
@@ -48,64 +51,91 @@ final class RecordingCoordinator: ObservableObject {
             try await r.start(session: s)
             recorder = r
             session = s
-            state.phase = .recording(start: Date())
+            let start = Date()
+            state.phase = .recording(start: start)
+            state.elapsedSeconds = 0
+            elapsedTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    self?.state.elapsedSeconds = Int(Date().timeIntervalSince(start))
+                }
+            }
+            notifier.notify(title: "Recording started",
+                            body: s.folder.lastPathComponent, category: "MEETING_END")
         } catch {
             state.lastError = "Could not start recording: \(error.localizedDescription)"
+            notifier.notify(title: "Recording failed to start",
+                            body: error.localizedDescription, category: "MEETING_START")
         }
     }
 
     func stopRecording() async {
         guard case .recording = state.phase, let r = recorder, let s = session else { return }
-        state.phase = .transcribing
+        elapsedTimer?.invalidate()
+        elapsedTimer = nil
+        state.phase = .idle
+        recorder = nil
+        session = nil
+        detectedApp = nil
         do {
             try await r.stop()
             if let warning = r.sourceWarning { state.lastError = warning }
             try await AudioRecorder.mix(session: s)
-            try await transcribe(session: s)
+            notifier.notify(title: "Recording saved",
+                            body: "\(s.folder.lastPathComponent)  -  transcribing in background…",
+                            category: "MEETING_END")
+            transcribeInBackground(session: s)
         } catch {
             state.lastError = error.localizedDescription
-            notifier.notify(title: "Transcription failed", body: "Audio is safe. Retry?",
+            notifier.notify(title: "Recording failed", body: error.localizedDescription,
                             category: "TRANSCRIBE_FAILED", userInfo: ["folder": s.folder.path])
         }
-        recorder = nil
-        session = nil
-        detectedApp = nil
-        state.phase = .idle
         refreshRecent()
     }
 
-    private func transcribe(session s: RecordingSession) async throws {
+    /// Runs whisper + claude cleanup off the main actor; the app stays usable
+    /// (and can record again) while transcription runs.
+    func transcribeInBackground(session s: RecordingSession) {
+        state.transcribingCount += 1
         let settings = self.settings
-        let result = try await Task.detached(priority: .userInitiated) { () -> String in
-            let t = Transcriber(mlxWhisperPath: settings.mlxWhisperPath, model: settings.whisperModel)
-            let mic = FileManager.default.fileExists(atPath: s.micURL.path) ? try t.transcribe(s.micURL) : []
-            let sys = FileManager.default.fileExists(atPath: s.systemURL.path) ? try t.transcribe(s.systemURL) : []
+        let notifier = self.notifier
+        Task.detached(priority: .utility) { [weak self] in
+            do {
+                let t = Transcriber(mlxWhisperPath: settings.mlxWhisperPath, model: settings.whisperModel)
+                let mic = FileManager.default.fileExists(atPath: s.micURL.path) ? try t.transcribe(s.micURL) : []
+                let sys = FileManager.default.fileExists(atPath: s.systemURL.path) ? try t.transcribe(s.systemURL) : []
 
-            let raw = try JSONEncoder().encode(["mic": mic, "system": sys])
-            try raw.write(to: s.transcriptJSON)
+                let raw = try JSONEncoder().encode(["mic": mic, "system": sys])
+                try raw.write(to: s.transcriptJSON)
 
-            let dur = max(mic.last?.end ?? 0, sys.last?.end ?? 0)
-            let fmt = DateFormatter()
-            fmt.dateFormat = "yyyy-MM-dd HH:mm"
-            var md = TranscriptFormatter.format(mic: mic, system: sys, header: .init(
-                date: fmt.string(from: s.start),
-                app: s.folder.lastPathComponent.components(separatedBy: "_").last ?? "manual",
-                duration: TranscriptFormatter.hms(dur),
-                model: settings.whisperModel, cleanedByClaude: false))
-            if settings.claudeCleanupEnabled, let polished = ClaudeCleaner.clean(md) {
-                md = polished
+                let dur = max(mic.last?.end ?? 0, sys.last?.end ?? 0)
+                let fmt = DateFormatter()
+                fmt.dateFormat = "yyyy-MM-dd HH:mm"
+                var md = TranscriptFormatter.format(mic: mic, system: sys, header: .init(
+                    date: fmt.string(from: s.start),
+                    app: s.folder.lastPathComponent.components(separatedBy: "_").last ?? "manual",
+                    duration: TranscriptFormatter.hms(dur),
+                    model: settings.whisperModel, cleanedByClaude: false))
+                try md.write(to: s.transcriptMD, atomically: true, encoding: .utf8)
+                await notifier.notifyAsync(title: "Transcript ready",
+                                           body: s.folder.lastPathComponent, category: "MEETING_END")
+
+                if settings.claudeCleanupEnabled, let polished = ClaudeCleaner.clean(md) {
+                    md = polished
+                    try md.write(to: s.transcriptMD, atomically: true, encoding: .utf8)
+                    await notifier.notifyAsync(title: "Transcript cleaned by Claude",
+                                               body: s.folder.lastPathComponent, category: "MEETING_END")
+                }
+            } catch {
+                await notifier.notifyAsync(title: "Transcription failed",
+                                           body: "Audio is safe. Retry? (\(error.localizedDescription))",
+                                           category: "TRANSCRIBE_FAILED",
+                                           userInfo: ["folder": s.folder.path])
             }
-            return md
-        }.value
-        try result.write(to: s.transcriptMD, atomically: true, encoding: .utf8)
-        notifier.notify(title: "Transcript ready", body: s.folder.lastPathComponent, category: "MEETING_END")
-    }
-
-    func retryTranscription(folder: URL) async {
-        state.phase = .transcribing
-        do { try await transcribe(session: RecordingSession(existingFolder: folder, start: Date())) }
-        catch { state.lastError = error.localizedDescription }
-        state.phase = .idle
+            await MainActor.run { [weak self] in
+                self?.state.transcribingCount -= 1
+                self?.refreshRecent()
+            }
+        }
     }
 
     func refreshRecent() {
