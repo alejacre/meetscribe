@@ -4,24 +4,24 @@ struct Transcriber {
     let mlxWhisperPath: String
     let model: String
 
-    /// Transcribes several audio files in ONE mlx_whisper invocation (the CLI accepts
-    /// multiple positional files), so the model is loaded once instead of per-file.
-    /// mlx_whisper writes <output-dir>/<input-basename>.json for each input.
+    /// Transcribes each audio file in its OWN mlx_whisper invocation, forcing a distinct
+    /// --output-name per file. Do NOT batch multiple files into one invocation: mlx_whisper
+    /// 0.4.3 overwrites the first file's JSON with the last file's output (verified),
+    /// which silently destroys the per-track Me/Them attribution.
     /// Returns segments per input, in the same order; missing files yield [].
     func transcribe(_ audios: [URL]) throws -> [[WhisperSegment]] {
-        let existing = audios.filter { FileManager.default.fileExists(atPath: $0.path) }
-        if !existing.isEmpty {
-            let dir = existing[0].deletingLastPathComponent()
-            try Subprocess.run(mlxWhisperPath, existing.map(\.path) + [
+        try audios.map { audio in
+            guard FileManager.default.fileExists(atPath: audio.path) else { return [] }
+            let dir = audio.deletingLastPathComponent()
+            let name = audio.deletingPathExtension().lastPathComponent
+            try Subprocess.run(mlxWhisperPath, [
+                audio.path,
                 "--model", model,
                 "--output-format", "json",
                 "--output-dir", dir.path,
+                "--output-name", name,
             ])
-        }
-        return try audios.map { audio in
-            let jsonURL = audio.deletingLastPathComponent()
-                .appendingPathComponent(audio.deletingPathExtension().lastPathComponent + ".json")
-            guard FileManager.default.fileExists(atPath: jsonURL.path) else { return [] }
+            let jsonURL = dir.appendingPathComponent(name + ".json")
             defer { try? FileManager.default.removeItem(at: jsonURL) }
             return try Self.parseSegments(Data(contentsOf: jsonURL))
         }
