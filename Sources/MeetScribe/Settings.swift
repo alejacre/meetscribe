@@ -1,6 +1,6 @@
 import Foundation
 
-struct Settings {
+struct Settings: @unchecked Sendable {
     private let d: UserDefaults
     init(defaults: UserDefaults = .standard) { self.d = defaults }
 

@@ -1,6 +1,6 @@
 import Foundation
 
-struct WhisperSegment: Codable, Equatable {
+struct WhisperSegment: Codable, Equatable, Sendable {
     let start: Double
     let end: Double
     let text: String

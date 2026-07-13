@@ -2,7 +2,7 @@ import Foundation
 import ScreenCaptureKit
 import AVFoundation
 
-final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
+final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     private var stream: SCStream?
     private var micFile: AVAudioFile?
     private var systemFile: AVAudioFile?

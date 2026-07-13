@@ -1,6 +1,6 @@
 import Foundation
 
-struct RecordingSession {
+struct RecordingSession: Sendable {
     let folder: URL
     let start: Date
 
