@@ -45,6 +45,39 @@ final class TranscriptFormatterTests: XCTestCase {
         XCTAssertTrue(md.contains("not cleaned"))
     }
 
+    func testEchoSuppressionDropsMicDuplicatesOfSystem() {
+        // Speaker echo: the mic picks up what the speakers play. Same words, same time.
+        let system = [seg(10, 14, "We let people do it themselves.")]
+        let mic = [seg(10.3, 14.2, "We let people do it themselves"),  // echo → drop
+                   seg(20, 23, "Hola, esto lo digo yo.")]              // real → keep
+        let filtered = TranscriptFormatter.suppressEcho(mic: mic, system: system)
+        XCTAssertEqual(filtered, [mic[1]])
+    }
+
+    func testEchoSuppressionKeepsPartialOverlapDifferentText() {
+        // Simultaneous speech: time overlaps but words differ → keep both.
+        let system = [seg(10, 14, "and the quarterly numbers look fine")]
+        let mic = [seg(11, 13, "perdona, ¿puedes repetir eso?")]
+        let filtered = TranscriptFormatter.suppressEcho(mic: mic, system: system)
+        XCTAssertEqual(filtered, mic)
+    }
+
+    func testEchoSuppressionHandlesFragmentedEcho() {
+        // Whisper often splits the echo differently: a mic fragment contained in a
+        // longer system segment still counts as echo.
+        let system = [seg(0, 8, "I think we all got involved with the task force because we wanted to be builders")]
+        let mic = [seg(2.1, 5.0, "we all got involved with the task force")]
+        let filtered = TranscriptFormatter.suppressEcho(mic: mic, system: system)
+        XCTAssertEqual(filtered, [])
+    }
+
+    func testEchoSuppressionIgnoresPunctuationAndCase() {
+        let system = [seg(0, 3, " Fair question. ")]
+        let mic = [seg(0.2, 3.1, "fair question")]
+        let filtered = TranscriptFormatter.suppressEcho(mic: mic, system: system)
+        XCTAssertEqual(filtered, [])
+    }
+
     func testEmptySegmentsSkipped() {
         let mic = [seg(0, 1, "   "), seg(2, 3, "real")]
         let md = TranscriptFormatter.format(mic: mic, system: [],

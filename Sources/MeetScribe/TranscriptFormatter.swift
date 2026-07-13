@@ -18,6 +18,33 @@ struct TranscriptHeader {
 
 enum TranscriptFormatter {
     static let pauseGap: Double = 2.0
+    /// Echo tolerance: mic echo of speaker audio lags/leads the system track slightly.
+    static let echoTimeSlack: Double = 1.5
+
+    /// Removes mic segments that are acoustic echo of the system track (speakers
+    /// picked up by the microphone when the user is not wearing headphones).
+    /// A mic segment is echo when it overlaps a system segment in time (with slack)
+    /// and its normalized text is contained in  -  or nearly identical to  -  that
+    /// system segment's text. The system track is authoritative for remote speech.
+    static func suppressEcho(mic: [WhisperSegment], system: [WhisperSegment]) -> [WhisperSegment] {
+        guard !system.isEmpty else { return mic }
+        return mic.filter { m in
+            let mText = normalize(m.text)
+            guard !mText.isEmpty else { return true }
+            for s in system {
+                guard m.start < s.end + echoTimeSlack, m.end > s.start - echoTimeSlack else { continue }
+                let sText = normalize(s.text)
+                if sText.contains(mText) || mText.contains(sText) { return false }
+            }
+            return true
+        }
+    }
+
+    private static func normalize(_ text: String) -> String {
+        text.lowercased()
+            .filter { $0.isLetter || $0.isNumber || $0.isWhitespace }
+            .split(separator: " ").joined(separator: " ")
+    }
 
     static func format(mic: [WhisperSegment], system: [WhisperSegment], header: TranscriptHeader) -> String {
         struct Tagged { let speaker: Speaker; let seg: WhisperSegment }

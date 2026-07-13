@@ -111,10 +111,14 @@ final class RecordingCoordinator: ObservableObject {
             do {
                 let t = Transcriber(mlxWhisperPath: settings.mlxWhisperPath, model: settings.whisperModel)
                 let tracks = try t.transcribe([s.micURL, s.systemURL])
-                let (mic, sys) = (tracks[0], tracks[1])
+                let (rawMic, sys) = (tracks[0], tracks[1])
 
-                let raw = try JSONEncoder().encode(["mic": mic, "system": sys])
+                let raw = try JSONEncoder().encode(["mic": rawMic, "system": sys])
                 try raw.write(to: s.transcriptJSON, options: .atomic)
+
+                // Without headphones the mic picks up the speakers; drop that echo
+                // so remote speech isn't duplicated as "Me".
+                let mic = TranscriptFormatter.suppressEcho(mic: rawMic, system: sys)
 
                 let dur = max(mic.last?.end ?? 0, sys.last?.end ?? 0)
                 var md = TranscriptFormatter.format(mic: mic, system: sys, header: .init(
