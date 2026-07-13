@@ -10,6 +10,12 @@ struct MeetScribeApp: App {
         let s = AppState()
         _state = StateObject(wrappedValue: s)
         _coordinator = StateObject(wrappedValue: RecordingCoordinator(state: s))
+        // LSUIElement apps can fall back to the generic icon in windows and
+        // dialogs; pin the bundled icon explicitly.
+        if let icns = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: icns) {
+            NSApplication.shared.applicationIconImage = icon
+        }
     }
 
     var body: some Scene {
