@@ -1,6 +1,9 @@
 import Foundation
 import CoreAudio
 import AppKit
+import os
+
+private let logger = Logger(subsystem: "dev.alejacre.meetscribe", category: "detector")
 
 struct DetectedMeeting: Equatable {
     let bundleID: String
@@ -35,6 +38,9 @@ final class MeetingDetector {
 
     private func poll() {
         let meeting = Self.appsUsingMicrophone().first
+        if meeting != current {
+            logger.info("mic usage changed: \(meeting?.appName ?? "none", privacy: .public) (was \(self.current?.appName ?? "none", privacy: .public))")
+        }
         if let meeting, meeting != current {
             current = meeting
             onMeetingStart?(meeting)

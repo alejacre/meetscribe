@@ -54,11 +54,14 @@ final class RecordingCoordinator: ObservableObject {
             let start = Date()
             state.phase = .recording(start: start)
             state.elapsedSeconds = 0
-            elapsedTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            // .common mode: keep ticking while the menu is open (menu tracking pauses default-mode timers)
+            let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     self?.state.elapsedSeconds = Int(Date().timeIntervalSince(start))
                 }
             }
+            RunLoop.main.add(timer, forMode: .common)
+            elapsedTimer = timer
             notifier.notify(title: "Recording started",
                             body: s.folder.lastPathComponent, category: "MEETING_END",
                             userInfo: ["folder": s.folder.path])
