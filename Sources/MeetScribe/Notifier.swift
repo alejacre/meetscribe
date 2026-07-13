@@ -4,7 +4,6 @@ import UserNotifications
 
 final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     var onRecordAction: (() -> Void)?
-    var onStopAction: (() -> Void)?
     var onRetryAction: ((URL) -> Void)?
 
     func setup() {
@@ -13,11 +12,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
         center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
 
         let record = UNNotificationAction(identifier: "RECORD", title: "Record", options: [])
-        let stop = UNNotificationAction(identifier: "STOP", title: "Stop recording", options: [])
         let retry = UNNotificationAction(identifier: "RETRY", title: "Retry transcription", options: [])
         center.setNotificationCategories([
             UNNotificationCategory(identifier: "MEETING_START", actions: [record], intentIdentifiers: []),
-            UNNotificationCategory(identifier: "MEETING_END", actions: [stop], intentIdentifiers: []),
+            UNNotificationCategory(identifier: "INFO", actions: [], intentIdentifiers: []),
             UNNotificationCategory(identifier: "TRANSCRIBE_FAILED", actions: [retry], intentIdentifiers: []),
         ])
     }
@@ -28,19 +26,26 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
         content.body = body
         content.categoryIdentifier = category
         content.userInfo = userInfo
-        // Meeting start/end prompts are actionable right now  -  break through Focus modes.
-        if category == "MEETING_START" || category == "MEETING_END" {
+        // The record prompt is actionable right now  -  break through Focus modes
+        // (best effort: full breakthrough needs the time-sensitive entitlement).
+        if category == "MEETING_START" {
             content.interruptionLevel = .timeSensitive
         }
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
 
+    // Present banners even while the app is active (menu open, Settings window);
+    // without this, macOS suppresses foreground notifications entirely.
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
+    }
+
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
         switch response.actionIdentifier {
         case "RECORD": onRecordAction?()
-        case "STOP": onStopAction?()
         case "RETRY":
             if let path = response.notification.request.content.userInfo["folder"] as? String {
                 onRetryAction?(URL(fileURLWithPath: path))

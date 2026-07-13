@@ -17,7 +17,6 @@ final class RecordingCoordinator: ObservableObject {
         self.state = state
         notifier.setup()
         notifier.onRecordAction = { [weak self] in Task { await self?.startRecording() } }
-        notifier.onStopAction = { [weak self] in Task { await self?.stopRecording() } }
         notifier.onRetryAction = { [weak self] folder in
             Task { @MainActor in self?.transcribeInBackground(session: RecordingSession(existingFolder: folder, start: Date())) }
         }
@@ -29,15 +28,13 @@ final class RecordingCoordinator: ObservableObject {
                                      body: "Want to record it?", category: "MEETING_START")
             }
         }
-        detector.onMeetingEnd = { [weak self] _ in
+        detector.onMeetingEnd = { [weak self] meeting in
             Task { @MainActor in
                 guard let self, case .recording = self.state.phase else { return }
                 self.notifier.notify(title: "Meeting ended",
-                                     body: "Stop the recording?", category: "MEETING_END")
-                if let secs = self.settings.autoStopSeconds {
-                    try? await Task.sleep(for: .seconds(secs))
-                    if case .recording = self.state.phase { await self.stopRecording() }
-                }
+                                     body: "Recording stopped  -  transcribing in background.",
+                                     category: "INFO")
+                await self.stopRecording()
             }
         }
         detector.startPolling()
@@ -67,7 +64,7 @@ final class RecordingCoordinator: ObservableObject {
                 options: [.idleSystemSleepDisabled],
                 reason: "MeetScribe is recording a meeting")
             notifier.notify(title: "Recording started",
-                            body: s.folder.lastPathComponent, category: "MEETING_END",
+                            body: s.folder.lastPathComponent, category: "INFO",
                             userInfo: ["folder": s.folder.path])
         } catch {
             state.lastError = "Could not start recording: \(error.localizedDescription)"
@@ -94,7 +91,7 @@ final class RecordingCoordinator: ObservableObject {
             try await AudioRecorder.mix(session: s)
             notifier.notify(title: "Recording saved",
                             body: "\(s.folder.lastPathComponent)  -  transcribing in background…",
-                            category: "MEETING_END")
+                            category: "INFO", userInfo: ["folder": s.folder.path])
             transcribeInBackground(session: s)
         } catch {
             state.lastError = error.localizedDescription
@@ -127,7 +124,7 @@ final class RecordingCoordinator: ObservableObject {
                     model: settings.whisperModel, cleanedByClaude: false))
                 try md.write(to: s.transcriptMD, atomically: true, encoding: .utf8)
                 notifier.notify(title: "Transcript ready",
-                                body: s.folder.lastPathComponent, category: "MEETING_END",
+                                body: s.folder.lastPathComponent, category: "INFO",
                                 userInfo: ["folder": s.folder.path])
 
                 if settings.claudeCleanupEnabled, let result = ClaudeCleaner.clean(md) {
@@ -144,7 +141,7 @@ final class RecordingCoordinator: ObservableObject {
                         }
                     }
                     notifier.notify(title: "Transcript cleaned by Claude",
-                                    body: finalFolder.lastPathComponent, category: "MEETING_END",
+                                    body: finalFolder.lastPathComponent, category: "INFO",
                                     userInfo: ["folder": finalFolder.path])
                 }
             } catch {
@@ -152,6 +149,9 @@ final class RecordingCoordinator: ObservableObject {
                                 body: "Audio is safe. Retry? (\(error.localizedDescription))",
                                 category: "TRANSCRIBE_FAILED",
                                 userInfo: ["folder": s.folder.path])
+                await MainActor.run { [weak self] in
+                    self?.state.lastError = "Transcription failed: \(error.localizedDescription)"
+                }
             }
             await MainActor.run { [weak self] in
                 self?.state.transcribingCount -= 1

@@ -14,7 +14,6 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(s.outputFolder.path, NSHomeDirectory() + "/Recordings")
         XCTAssertEqual(s.whisperModel, "mlx-community/whisper-large-v3-turbo")
         XCTAssertTrue(s.claudeCleanupEnabled)
-        XCTAssertNil(s.autoStopSeconds)
         XCTAssertTrue(s.mlxWhisperPath.hasSuffix("mlx_whisper"))
     }
 
@@ -22,10 +21,8 @@ final class SettingsTests: XCTestCase {
         var s = Settings(defaults: defaults)
         s.outputFolder = URL(fileURLWithPath: "/tmp/recs")
         s.claudeCleanupEnabled = false
-        s.autoStopSeconds = 30
         let s2 = Settings(defaults: defaults)
         XCTAssertEqual(s2.outputFolder.path, "/tmp/recs")
         XCTAssertFalse(s2.claudeCleanupEnabled)
-        XCTAssertEqual(s2.autoStopSeconds, 30)
     }
 }

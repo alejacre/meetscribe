@@ -22,8 +22,4 @@ struct Settings: @unchecked Sendable {
         get { d.object(forKey: "claudeCleanupEnabled") as? Bool ?? true }
         set { d.set(newValue, forKey: "claudeCleanupEnabled") }
     }
-    var autoStopSeconds: Int? {
-        get { d.object(forKey: "autoStopSeconds") as? Int }
-        set { if let v = newValue { d.set(v, forKey: "autoStopSeconds") } else { d.removeObject(forKey: "autoStopSeconds") } }
-    }
 }

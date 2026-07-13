@@ -6,8 +6,6 @@ struct SettingsView: View {
     @State private var model = ""
     @State private var whisperPath = ""
     @State private var cleanup = true
-    @State private var autoStop = false
-    @State private var autoStopSecs = 30
 
     private static let models = [
         "mlx-community/whisper-large-v3-turbo",
@@ -77,15 +75,7 @@ struct SettingsView: View {
             }
 
             Section("Meetings") {
-                Toggle("Auto-stop when meeting ends", isOn: $autoStop)
-                    .onChange(of: autoStop) { _, v in
-                        settings.autoStopSeconds = v ? autoStopSecs : nil
-                    }
-                if autoStop {
-                    Stepper("Stop after \(autoStopSecs) seconds", value: $autoStopSecs, in: 5...120, step: 5)
-                        .onChange(of: autoStopSecs) { _, v in settings.autoStopSeconds = v }
-                }
-                Text("MeetScribe watches for Zoom, Slack, Chime, Teams, FaceTime and WebEx using the microphone and offers to record.")
+                Text("MeetScribe watches for Zoom, Slack, Chime, Teams, FaceTime and WebEx using the microphone, offers to record when a meeting starts, and stops automatically when it ends.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -98,8 +88,6 @@ struct SettingsView: View {
             model = settings.whisperModel
             whisperPath = settings.mlxWhisperPath
             cleanup = settings.claudeCleanupEnabled
-            autoStop = settings.autoStopSeconds != nil
-            autoStopSecs = settings.autoStopSeconds ?? 30
         }
     }
 
