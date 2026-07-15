@@ -41,21 +41,27 @@ private final class PipeBuffer: @unchecked Sendable {
 enum Subprocess {
     /// Writing stdin to a child that already exited raises SIGPIPE, which kills the
     /// whole app; ignore it once so the write surfaces as a catchable error instead.
-    private static let ignoreSigpipe: Void = { signal(SIGPIPE, SIG_IGN) }()
+    static let ignoreSigpipe: Void = { signal(SIGPIPE, SIG_IGN) }()
+
+    /// Builds a Process with the widened PATH both `run` and `stream` need.
+    /// Apps launched from Finder get a minimal PATH; tools like mlx_whisper
+    /// shell out to ffmpeg and need Homebrew/user paths visible.
+    static func makeProcess(_ executable: String, _ args: [String]) -> Process {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: executable)
+        p.arguments = args
+        var env = ProcessInfo.processInfo.environment
+        let extra = ["/opt/homebrew/bin", "/usr/local/bin", NSHomeDirectory() + "/.local/bin"]
+        env["PATH"] = (extra + [(env["PATH"] ?? "/usr/bin:/bin")]).joined(separator: ":")
+        p.environment = env
+        return p
+    }
 
     @discardableResult
     static func run(_ executable: String, _ args: [String], stdin: String? = nil,
                     timeout: TimeInterval = 1800) throws -> String {
         _ = ignoreSigpipe
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: executable)
-        p.arguments = args
-        // Apps launched from Finder get a minimal PATH; tools like mlx_whisper
-        // shell out to ffmpeg and need Homebrew/user paths visible.
-        var env = ProcessInfo.processInfo.environment
-        let extra = ["/opt/homebrew/bin", "/usr/local/bin", NSHomeDirectory() + "/.local/bin"]
-        env["PATH"] = (extra + [(env["PATH"] ?? "/usr/bin:/bin")]).joined(separator: ":")
-        p.environment = env
+        let p = makeProcess(executable, args)
         let out = Pipe(), err = Pipe()
         p.standardOutput = out
         p.standardError = err

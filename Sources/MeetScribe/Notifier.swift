@@ -6,10 +6,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
     var onRecordAction: (() -> Void)?
     var onRetryAction: ((URL) -> Void)?
 
-    func setup() {
+    /// Wires the delegate and notification categories. Does NOT request authorization:
+    /// on first run the setup wizard asks (sequenced with the other permissions);
+    /// afterwards `RecordingCoordinator` requests it at launch if still undetermined.
+    func configure() {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
 
         let record = UNNotificationAction(identifier: "RECORD", title: "Record", options: [])
         let retry = UNNotificationAction(identifier: "RETRY", title: "Retry transcription", options: [])

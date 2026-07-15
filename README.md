@@ -12,20 +12,22 @@ MeetScribe watches for Zoom, Slack huddles, Amazon Chime, Microsoft Teams, FaceT
 - **Optional Claude cleanup** - if the `claude` CLI is available, a headless pass fixes punctuation, removes filler words, adds a short summary, and derives a topic slug for the note filename. Falls back to the raw whisper transcript if unavailable.
 - **Obsidian-friendly output** - each recording becomes a flat Markdown note (YAML frontmatter + transcript) with audio and raw JSON tucked into a hidden `.assets/` sidecar folder, so it drops straight into a notes vault without cluttering it.
 - **Menu bar native** - no Dock icon, live elapsed-time counter, recent recordings menu, in-app transcript search, global hotkey (`⌥⇧R`) to start/stop, launch at login.
+- **First-run setup wizard** - installs the transcription engine, pre-downloads a model, and walks you through permissions on first launch. Re-openable anytime from the menu.
 
 ## Requirements
 
 - macOS 15+ (Apple Silicon)
-- [`mlx_whisper`](https://github.com/ml-explore/mlx-examples/tree/main/whisper) installed and on disk (path configurable in Settings)
+- Screen Recording and Microphone permissions (the setup wizard requests them)
 - Optional: [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`) for transcript cleanup
-- Screen Recording and Microphone permissions (requested on first use)
+
+The transcription engine ([`mlx_whisper`](https://github.com/ml-explore/mlx-examples/tree/main/whisper)) does not need to be pre-installed - the setup wizard installs it for you via [`uv`](https://docs.astral.sh/uv/) (bootstrapping `uv` itself if needed) and downloads the whisper model.
 
 ## Install
 
 Clone and build a signed `.app` bundle:
 
 ```bash
-git clone https://github.com/Alex10Cr/meetscribe.git
+git clone https://github.com/alejacre/meetscribe.git
 cd meetscribe
 ./build.sh
 open build/MeetScribe.app
@@ -34,6 +36,18 @@ open build/MeetScribe.app
 `build.sh` compiles a release build with `swift build`, assembles the `.app`, and code-signs it. It looks for a local self-signed identity named `MeetScribe Dev Signing` to keep the signature stable across rebuilds (so macOS doesn't re-ask for Screen Recording / Microphone permission every time); if that identity isn't found it falls back to an ad-hoc signature.
 
 To create your own stable signing identity: open **Keychain Access** → **Certificate Assistant** → **Create a Certificate…**, name it `MeetScribe Dev Signing`, type "Code Signing".
+
+## First-run setup
+
+On first launch a setup wizard opens automatically and walks you through:
+
+1. **Transcription engine** - detects `mlx_whisper`; if missing, one-click installs it with `uv tool install mlx-whisper` (installing `uv` first if needed), streaming progress live.
+2. **Whisper model** - pick a model and pre-download it (~1.5 GB for the default turbo) so your first real transcription is fast.
+3. **Permissions** - grants Screen Recording, Microphone, and Notifications with deep links to the right System Settings panes.
+4. **Output folder** - where notes and audio are saved (point it at a notes vault if you like).
+5. **Claude cleanup** - detects the `claude` CLI and toggles the cleanup pass.
+
+Re-run it anytime from the menu bar → **Setup assistant…**.
 
 ## Usage
 
@@ -98,6 +112,10 @@ Audio and raw Whisper JSON live alongside it in a hidden sidecar so they don't c
 | `ClaudeCleaner` | Optional headless `claude -p` cleanup pass |
 | `RecordingCoordinator` | Orchestrates the record → transcribe → cleanup pipeline and notifications |
 | `RecordingSession` | Note/asset path conventions |
+| `SetupModel` / `SetupView` | First-run wizard: engine install, model download, permissions |
+| `ToolFinder` | Locates CLI binaries (candidate dirs + login-shell PATH) |
+| `Permissions` | Screen Recording / Microphone / Notification TCC helpers |
+| `Subprocess` | Sync + streaming subprocess execution |
 
 ## Testing
 
@@ -105,7 +123,7 @@ Audio and raw Whisper JSON live alongside it in a hidden sidecar so they don't c
 swift test
 ```
 
-Unit tests cover transcript formatting, echo suppression, note-path conventions, and settings persistence.
+Unit tests cover transcript formatting, echo suppression, note-path conventions, settings persistence, the WAV builder, subprocess streaming, and the wizard's model-cache mapping / progress parsing / log handling.
 
 ## Non-goals
 

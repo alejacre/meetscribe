@@ -29,22 +29,7 @@ enum ClaudeCleaner {
 
     /// Resolved once per app run  -  the binary's location can't change mid-session and
     /// the login-shell fallback is expensive (sources the full zsh profile).
-    static let resolvedBinary: String? = findBinary()
-
-    /// Locates the claude CLI: fixed candidates first, then the user's login shell PATH
-    /// (covers version-managed installs like mise/nvm whose paths change across upgrades).
-    static func findBinary() -> String? {
-        let candidates = [NSHomeDirectory() + "/.local/bin/claude", "/usr/local/bin/claude",
-                          "/opt/homebrew/bin/claude"]
-        if let hit = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
-            return hit
-        }
-        guard let path = try? Subprocess.run("/bin/zsh", ["-lc", "which claude"], timeout: 30)
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !path.isEmpty, FileManager.default.isExecutableFile(atPath: path)
-        else { return nil }
-        return path
-    }
+    static let resolvedBinary: String? = ToolFinder.findTool("claude")
 
     /// Returns cleaned markdown + topic slug, or nil if claude is unavailable/fails
     /// (caller falls back to the raw transcript).

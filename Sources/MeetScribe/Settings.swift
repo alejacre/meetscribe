@@ -14,8 +14,10 @@ struct Settings: @unchecked Sendable {
         set { d.set(newValue, forKey: "whisperModel") }
     }
     var mlxWhisperPath: String {
+        // Default matches `uv tool install mlx-whisper` (the setup wizard's installer);
+        // the wizard overwrites this with the resolved path once it locates the binary.
         get { d.string(forKey: "mlxWhisperPath")
-              ?? NSHomeDirectory() + "/.local/share/mise/installs/python/3.12/bin/mlx_whisper" }
+              ?? NSHomeDirectory() + "/.local/bin/mlx_whisper" }
         set { d.set(newValue, forKey: "mlxWhisperPath") }
     }
     var claudeCleanupEnabled: Bool {
@@ -25,5 +27,9 @@ struct Settings: @unchecked Sendable {
     var hotKeyEnabled: Bool {
         get { d.object(forKey: "hotKeyEnabled") as? Bool ?? true }
         set { d.set(newValue, forKey: "hotKeyEnabled") }
+    }
+    var setupCompleted: Bool {
+        get { d.object(forKey: "setupCompleted") as? Bool ?? false }
+        set { d.set(newValue, forKey: "setupCompleted") }
     }
 }

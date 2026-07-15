@@ -5,6 +5,7 @@ struct MeetScribeApp: App {
     @StateObject private var state: AppState
     @StateObject private var coordinator: RecordingCoordinator
     @Environment(\.openWindow) private var openWindow
+    private let firstRun = !Settings().setupCompleted
 
     init() {
         let s = AppState()
@@ -72,6 +73,10 @@ struct MeetScribeApp: App {
             }
             Button("Open recordings folder") { NSWorkspace.shared.open(Settings().outputFolder) }
             Divider()
+            Button("Setup assistant…") {
+                openWindow(id: "setup")
+                NSApp.activate(ignoringOtherApps: true)
+            }
             SettingsLink { Text("Settings…") }
             if state.isQuitting {
                 Text("Quitting  -  waiting for transcription…")
@@ -89,6 +94,10 @@ struct MeetScribeApp: App {
         SwiftUI.Settings { SettingsView() }
         Window("Search transcripts", id: "search") { SearchView() }
             .windowResizability(.contentSize)
+        Window("MeetScribe Setup", id: "setup") { SetupView() }
+            .windowResizability(.contentSize)
+            .defaultLaunchBehavior(firstRun ? .presented : .suppressed)
+            .restorationBehavior(.disabled)
     }
 
     private var quitLabel: String {

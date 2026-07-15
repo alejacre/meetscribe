@@ -25,4 +25,11 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(s2.outputFolder.path, "/tmp/recs")
         XCTAssertFalse(s2.claudeCleanupEnabled)
     }
+
+    func testSetupCompletedDefaultsFalseAndPersists() {
+        var s = Settings(defaults: defaults)
+        XCTAssertFalse(s.setupCompleted)
+        s.setupCompleted = true
+        XCTAssertTrue(Settings(defaults: defaults).setupCompleted)
+    }
 }

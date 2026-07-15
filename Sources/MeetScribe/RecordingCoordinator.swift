@@ -18,7 +18,12 @@ final class RecordingCoordinator: ObservableObject {
 
     init(state: AppState) {
         self.state = state
-        notifier.setup()
+        notifier.configure()
+        // First-run users grant notifications in the wizard; only ask here once setup
+        // is done (and the wizard has had its chance to sequence the prompt).
+        if settings.setupCompleted {
+            Task { await Permissions.requestNotifications() }
+        }
         notifier.onRecordAction = { [weak self] in Task { await self?.startRecording() } }
         notifier.onRetryAction = { [weak self] note in
             Task { @MainActor in self?.transcribeInBackground(session: RecordingSession(existingNote: note)) }
