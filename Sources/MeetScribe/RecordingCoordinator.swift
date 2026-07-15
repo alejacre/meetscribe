@@ -20,8 +20,8 @@ final class RecordingCoordinator: ObservableObject {
         self.state = state
         notifier.setup()
         notifier.onRecordAction = { [weak self] in Task { await self?.startRecording() } }
-        notifier.onRetryAction = { [weak self] folder in
-            Task { @MainActor in self?.transcribeInBackground(session: RecordingSession(existingFolder: folder, start: Date())) }
+        notifier.onRetryAction = { [weak self] note in
+            Task { @MainActor in self?.transcribeInBackground(session: RecordingSession(existingNote: note)) }
         }
         detector.onMeetingStart = { [weak self] meeting in
             Task { @MainActor in
@@ -76,7 +76,7 @@ final class RecordingCoordinator: ObservableObject {
                     guard let self, case .recording = self.state.phase, self.recorder === r else { return }
                     self.notifier.notify(title: "Recording interrupted",
                                          body: "Audio saved up to this point. (\(error.localizedDescription))",
-                                         category: "INFO", userInfo: ["folder": s.folder.path])
+                                         category: "INFO", userInfo: ["note": s.noteURL.path])
                     await self.stopRecording()
                 }
             }
@@ -98,8 +98,8 @@ final class RecordingCoordinator: ObservableObject {
                 options: [.idleSystemSleepDisabled],
                 reason: "MeetScribe is recording a meeting")
             notifier.notify(title: "Recording started",
-                            body: s.folder.lastPathComponent, category: "INFO",
-                            userInfo: ["folder": s.folder.path])
+                            body: s.basename, category: "INFO",
+                            userInfo: ["note": s.noteURL.path])
         } catch {
             state.phase = .idle
             state.lastError = "Could not start recording: \(error.localizedDescription)"
@@ -130,13 +130,13 @@ final class RecordingCoordinator: ObservableObject {
             if let warning = r.sourceWarning { state.lastError = warning }
             try await AudioRecorder.mix(session: s)
             notifier.notify(title: "Recording saved",
-                            body: "\(s.folder.lastPathComponent)  -  transcribing in background…",
-                            category: "INFO", userInfo: ["folder": s.folder.path])
+                            body: "\(s.basename)  -  transcribing in background…",
+                            category: "INFO", userInfo: ["note": s.noteURL.path])
             transcribeInBackground(session: s)
         } catch {
             state.lastError = error.localizedDescription
             notifier.notify(title: "Recording failed", body: error.localizedDescription,
-                            category: "TRANSCRIBE_FAILED", userInfo: ["folder": s.folder.path])
+                            category: "TRANSCRIBE_FAILED", userInfo: ["note": s.noteURL.path])
         }
         refreshRecent()
     }
@@ -161,40 +161,53 @@ final class RecordingCoordinator: ObservableObject {
                 let mic = TranscriptFormatter.suppressEcho(mic: rawMic, system: sys)
 
                 let dur = max(mic.last?.end ?? 0, sys.last?.end ?? 0)
+                // Provisional app label: the appName, or (on retry, where appName is nil)
+                // the slug portion of the note basename after the `yyyy-MM-dd-` prefix.
+                let appLabel = s.appName ?? String(s.basename.dropFirst(s.datePart.count + 1))
                 var md = TranscriptFormatter.format(mic: mic, system: sys, header: .init(
                     date: RecordingSession.headerDateFormatter.string(from: s.start),
-                    app: s.appName ?? s.folder.lastPathComponent.components(separatedBy: "_").last ?? "manual",
+                    app: appLabel.isEmpty ? "manual" : appLabel,
                     duration: TranscriptFormatter.hms(dur),
                     model: settings.whisperModel, cleanedByClaude: false))
                 try md.write(to: s.transcriptMD, atomically: true, encoding: .utf8)
                 notifier.notify(title: "Transcript ready",
-                                body: s.folder.lastPathComponent, category: "INFO",
-                                userInfo: ["folder": s.folder.path])
+                                body: s.basename, category: "INFO",
+                                userInfo: ["note": s.noteURL.path])
 
                 if settings.claudeCleanupEnabled, let result = ClaudeCleaner.clean(md) {
-                    // The prompt tells Claude not to touch the header, so the
-                    // Cleanup line still says "not cleaned"  -  patch it here.
+                    // The prompt tells Claude not to touch the meta comment, so it still
+                    // reads cleaned=false  -  patch it here.
                     md = TranscriptFormatter.markCleaned(result.markdown)
                     try md.write(to: s.transcriptMD, atomically: true, encoding: .utf8)
-                    // Rename folder to <date>_<time>_<topic> now that we know the topic.
-                    var finalFolder = s.folder
+                    // Rename note + asset dir to <date>-<topic> now that we know the topic.
+                    var finalNote = s.noteURL
                     if let slug = result.topicSlug {
-                        let stamp = s.folder.lastPathComponent.split(separator: "_").prefix(2).joined(separator: "_")
-                        let dest = s.folder.deletingLastPathComponent().appendingPathComponent("\(stamp)_\(slug)")
-                        if dest != s.folder, !FileManager.default.fileExists(atPath: dest.path),
-                           (try? FileManager.default.moveItem(at: s.folder, to: dest)) != nil {
-                            finalFolder = dest
+                        let root = s.noteURL.deletingLastPathComponent()
+                        var dest = root.appendingPathComponent("\(s.datePart)-\(slug).md")
+                        var n = 2
+                        while dest != s.noteURL, FileManager.default.fileExists(atPath: dest.path) {
+                            dest = root.appendingPathComponent("\(s.datePart)-\(slug)-\(n).md"); n += 1
+                        }
+                        if dest != s.noteURL,
+                           (try? FileManager.default.moveItem(at: s.noteURL, to: dest)) != nil {
+                            finalNote = dest
+                            // Keep the asset dir name in sync with the note (best effort).
+                            let assetDest = s.assetDir.deletingLastPathComponent()
+                                .appendingPathComponent(dest.deletingPathExtension().lastPathComponent, isDirectory: true)
+                            if !FileManager.default.fileExists(atPath: assetDest.path) {
+                                try? FileManager.default.moveItem(at: s.assetDir, to: assetDest)
+                            }
                         }
                     }
                     notifier.notify(title: "Transcript cleaned by Claude",
-                                    body: finalFolder.lastPathComponent, category: "INFO",
-                                    userInfo: ["folder": finalFolder.path])
+                                    body: finalNote.deletingPathExtension().lastPathComponent, category: "INFO",
+                                    userInfo: ["note": finalNote.path])
                 }
             } catch {
                 notifier.notify(title: "Transcription failed",
                                 body: "Audio is safe. Retry? (\(error.localizedDescription))",
                                 category: "TRANSCRIBE_FAILED",
-                                userInfo: ["folder": s.folder.path])
+                                userInfo: ["note": s.noteURL.path])
                 await MainActor.run { [weak self] in
                     self?.state.lastError = "Transcription failed: \(error.localizedDescription)"
                 }
@@ -217,8 +230,8 @@ final class RecordingCoordinator: ObservableObject {
         NSApplication.shared.terminate(nil)
     }
 
-    func retryTranscription(folder: URL) {
-        transcribeInBackground(session: RecordingSession(existingFolder: folder, start: Date()))
+    func retryTranscription(note: URL) {
+        transcribeInBackground(session: RecordingSession(existingNote: note))
     }
 
     func clearError() {
@@ -227,11 +240,14 @@ final class RecordingCoordinator: ObservableObject {
     }
 
     func refreshRecent() {
+        // Recent = MEETSCRIBE notes only, not the vault's hand-curated meeting notes.
+        // A recording note is the one that owns a `.assets/<basename>/` sidecar dir.
         let fm = FileManager.default
-        let dirs = (try? fm.contentsOfDirectory(at: settings.outputFolder,
-                                                includingPropertiesForKeys: [.isDirectoryKey]))?
-            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false }
+        let notes = (try? fm.contentsOfDirectory(at: settings.outputFolder,
+                                                 includingPropertiesForKeys: nil))?
+            .filter { $0.pathExtension == "md" }
+            .filter { fm.fileExists(atPath: RecordingSession(existingNote: $0).assetDir.path) }
             .sorted { $0.lastPathComponent > $1.lastPathComponent } ?? []
-        state.recentRecordings = Array(dirs.prefix(5))
+        state.recentRecordings = Array(notes.prefix(5))
     }
 }

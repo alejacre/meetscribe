@@ -6,15 +6,18 @@ enum ClaudeCleaner {
     remove filler words (um, eh, vale vale, you know) and false starts, and merge fragments into \
     coherent paragraphs. STRICT RULES: keep every [hh:mm:ss] timestamp and every **Me:**/**Them:** \
     label exactly as-is; keep each language (Spanish/English) as spoken  -  do not translate; do not \
-    summarize, reorder, or omit content in the transcript body; keep the markdown header untouched.
+    summarize, reorder, or omit content in the transcript body; keep the YAML frontmatter block \
+    (between the opening and closing ---) exactly as-is; keep the trailing \
+    <!-- meetscribe: ... --> comment exactly as-is.
 
     Additionally:
     1. The FIRST line of your output must be exactly: <!-- topic: <slug> --> where <slug> is 1-3 \
     lowercase words joined by hyphens describing what the meeting is about (e.g. q3-budget-review, \
     incident-triage, standup). Use the transcript's main language for the slug.
-    2. Right after the header's --- separator, insert a "## Summary" section: 2-4 sentences \
+    2. Right after the frontmatter's closing --- line, insert a "## Summary" section: 2-4 sentences \
     describing what was discussed and any decisions or action items, in the transcript's main language.
-    3. Then a "## Transcript" heading followed by the cleaned transcript body.
+    3. Then the "## Transcript" heading followed by the cleaned transcript body, and finally the \
+    unchanged <!-- meetscribe: ... --> comment.
 
     Output ONLY the markdown, no commentary.
     """
@@ -48,7 +51,9 @@ enum ClaudeCleaner {
     static func clean(_ markdown: String) -> Result? {
         guard let bin = resolvedBinary else { return nil }
         let raw = try? Subprocess.run(bin, ["-p", prompt], stdin: markdown, timeout: 300)
-        guard let raw, raw.contains("# Meeting transcript") else { return nil }
+        // Sanity gate: a valid result must still carry the frontmatter and the transcript
+        // body; otherwise fall back to the raw whisper note.
+        guard let raw, raw.contains("date:"), raw.contains("## Transcript") else { return nil }
         let (slug, body) = extractTopic(raw)
         return Result(markdown: body, topicSlug: slug)
     }

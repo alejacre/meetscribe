@@ -7,23 +7,24 @@ struct SearchHit: Identifiable {
     let line: String
 }
 
-/// Case-insensitive grep over */transcript.md in the output folder. No index:
-/// at the current scale a direct scan is instant.
+/// Case-insensitive grep over MEETSCRIBE meeting notes in the output folder. Scans
+/// `*.md` that own a `.assets/<basename>/` sidecar (so hand-curated vault notes are
+/// skipped). No index: at the current scale a direct scan is instant.
 enum TranscriptSearch {
     static func search(_ query: String, root: URL) -> [SearchHit] {
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return [] }
         let fm = FileManager.default
-        let dirs = ((try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey])) ?? [])
-            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false }
+        let notes = ((try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == "md" }
+            .filter { fm.fileExists(atPath: RecordingSession(existingNote: $0).assetDir.path) }
             .sorted { $0.lastPathComponent > $1.lastPathComponent }
         var hits: [SearchHit] = []
-        for dir in dirs {
-            let md = dir.appendingPathComponent("transcript.md")
+        for md in notes {
             guard let text = try? String(contentsOf: md, encoding: .utf8) else { continue }
             for line in text.split(separator: "\n")
             where line.localizedCaseInsensitiveContains(q) {
-                hits.append(SearchHit(folder: dir, file: md,
+                hits.append(SearchHit(folder: md, file: md,
                                       line: line.trimmingCharacters(in: .whitespaces)))
                 if hits.count >= 100 { return hits }
             }

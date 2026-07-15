@@ -49,19 +49,19 @@ struct MeetScribeApp: App {
             if !state.recentRecordings.isEmpty {
                 Menu("Recent recordings") {
                     ForEach(state.recentRecordings, id: \.self) { url in
-                        let rec = RecordingSession(existingFolder: url, start: Date())
+                        let rec = RecordingSession(existingNote: url)
                         let hasTranscript = FileManager.default.fileExists(atPath: rec.transcriptMD.path)
-                        Menu(url.lastPathComponent) {
+                        Menu(rec.basename) {
                             Button("Open transcript") { NSWorkspace.shared.open(rec.transcriptMD) }
                                 .disabled(!hasTranscript)
                             Button("Copy summary") { copySummary(rec) }
                                 .disabled(!hasTranscript)
                             if !hasTranscript {
-                                Button("Retry transcription") { coordinator.retryTranscription(folder: url) }
+                                Button("Retry transcription") { coordinator.retryTranscription(note: url) }
                             }
                             Button("Play audio") { NSWorkspace.shared.open(rec.mixURL) }
                                 .disabled(!FileManager.default.fileExists(atPath: rec.mixURL.path))
-                            Button("Show in Finder") { NSWorkspace.shared.open(url) }
+                            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
                         }
                     }
                 }

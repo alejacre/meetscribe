@@ -47,13 +47,13 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
         switch response.actionIdentifier {
         case "RECORD": onRecordAction?()
         case "RETRY":
-            if let path = response.notification.request.content.userInfo["folder"] as? String {
+            if let path = response.notification.request.content.userInfo["note"] as? String {
                 onRetryAction?(URL(fileURLWithPath: path))
             }
         case UNNotificationDefaultActionIdentifier:
-            // Tap on the notification body: reveal the recording folder if it has one.
-            if let path = response.notification.request.content.userInfo["folder"] as? String {
-                NSWorkspace.shared.open(URL(fileURLWithPath: path, isDirectory: true))
+            // Tap on the notification body: open the meeting note if it has one.
+            if let path = response.notification.request.content.userInfo["note"] as? String {
+                NSWorkspace.shared.open(URL(fileURLWithPath: path))
             }
         default: break
         }

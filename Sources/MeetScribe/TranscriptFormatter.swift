@@ -66,28 +66,37 @@ enum TranscriptFormatter {
             prevSpeaker = t.speaker
         }
 
+        // Obsidian-style meeting note: YAML frontmatter matching the vault convention,
+        // then a raw "## Transcript" body. Claude cleanup later inserts "## Summary"
+        // above the transcript. Recording metadata (model/duration/cleanup) lives in a
+        // trailing HTML comment so it stays out of the rendered note and the graph.
         var out = """
-        # Meeting transcript  -  \(header.date)
-
-        - App: \(header.app)
-        - Duration: \(header.duration)
-        - Model: \(header.model)
-        - Cleanup: \(header.cleanedByClaude ? "cleaned by Claude" : "not cleaned (raw whisper)")
-
         ---
+        date: \(header.date)
+        attendees: []
+        tags: [meeting, transcript]
+        ---
+
+        ## Transcript
 
         """
         for turn in turns {
             out += "\n[\(hms(turn.start))] **\(turn.speaker.rawValue):** \(turn.texts.joined(separator: " "))\n"
         }
+        out += "\n\(metaComment(header))\n"
         return out
     }
 
-    /// Flips the header's Cleanup line after Claude cleanup (the prompt forbids
-    /// Claude itself from editing the header).
+    /// Trailing provenance line: `<!-- meetscribe: app=…, duration=…, model=…, cleaned=… -->`.
+    static func metaComment(_ header: TranscriptHeader) -> String {
+        "<!-- meetscribe: app=\(header.app), duration=\(header.duration), "
+            + "model=\(header.model), cleaned=\(header.cleanedByClaude) -->"
+    }
+
+    /// Flips the trailing metadata comment's `cleaned` flag after Claude cleanup (the
+    /// prompt forbids Claude itself from editing frontmatter or the meta comment).
     static func markCleaned(_ markdown: String) -> String {
-        markdown.replacingOccurrences(of: "- Cleanup: not cleaned (raw whisper)",
-                                      with: "- Cleanup: cleaned by Claude")
+        markdown.replacingOccurrences(of: "cleaned=false -->", with: "cleaned=true -->")
     }
 
     /// Extracts the body of the "## Summary" section (added by Claude cleanup),

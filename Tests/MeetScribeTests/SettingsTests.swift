@@ -11,7 +11,7 @@ final class SettingsTests: XCTestCase {
 
     func testDefaults() {
         let s = Settings(defaults: defaults)
-        XCTAssertEqual(s.outputFolder.path, NSHomeDirectory() + "/Recordings")
+        XCTAssertEqual(s.outputFolder.path, NSHomeDirectory() + "/Projects/BRAIN/04-meetings")
         XCTAssertEqual(s.whisperModel, "mlx-community/whisper-large-v3-turbo")
         XCTAssertTrue(s.claudeCleanupEnabled)
         XCTAssertTrue(s.mlxWhisperPath.hasSuffix("mlx_whisper"))

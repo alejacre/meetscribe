@@ -36,13 +36,15 @@ final class TranscriptFormatterTests: XCTestCase {
 
     func testHeader() {
         let md = TranscriptFormatter.format(mic: [], system: [],
-                                            header: .init(date: "2026-07-13 15:30", app: "zoom",
+                                            header: .init(date: "2026-07-13", app: "zoom",
                                                           duration: "45:02", model: "turbo", cleanedByClaude: false))
-        XCTAssertTrue(md.contains("# Meeting transcript  -  2026-07-13 15:30"))
-        XCTAssertTrue(md.contains("zoom"))
-        XCTAssertTrue(md.contains("45:02"))
-        XCTAssertTrue(md.contains("turbo"))
-        XCTAssertTrue(md.contains("not cleaned"))
+        // YAML frontmatter matching the vault's meeting-note convention.
+        XCTAssertTrue(md.hasPrefix("---\ndate: 2026-07-13\n"))
+        XCTAssertTrue(md.contains("tags: [meeting, transcript]"))
+        XCTAssertTrue(md.contains("attendees: []"))
+        XCTAssertTrue(md.contains("## Transcript"))
+        // Recording provenance lives in the trailing meta comment, not the frontmatter.
+        XCTAssertTrue(md.contains("<!-- meetscribe: app=zoom, duration=45:02, model=turbo, cleaned=false -->"))
     }
 
     func testEchoSuppressionDropsMicDuplicatesOfSystem() {
@@ -82,14 +84,15 @@ final class TranscriptFormatterTests: XCTestCase {
         let md = TranscriptFormatter.format(mic: [], system: [],
                                             header: .init(date: "d", app: "a", duration: "x", model: "m", cleanedByClaude: false))
         let patched = TranscriptFormatter.markCleaned(md)
-        XCTAssertTrue(patched.contains("- Cleanup: cleaned by Claude"))
-        XCTAssertFalse(patched.contains("not cleaned (raw whisper)"))
+        XCTAssertTrue(patched.contains("cleaned=true -->"))
+        XCTAssertFalse(patched.contains("cleaned=false"))
     }
 
     func testExtractSummary() {
         let md = """
-        # Meeting transcript  -  d
-
+        ---
+        date: 2026-07-13
+        tags: [meeting, transcript]
         ---
 
         ## Summary
@@ -104,7 +107,7 @@ final class TranscriptFormatterTests: XCTestCase {
     }
 
     func testExtractSummaryMissingReturnsNil() {
-        XCTAssertNil(TranscriptFormatter.extractSummary("# Meeting transcript\n\nno summary here"))
+        XCTAssertNil(TranscriptFormatter.extractSummary("---\ndate: d\n---\n\n## Transcript\nno summary here"))
     }
 
     func testEmptySegmentsSkipped() {

@@ -6,7 +6,7 @@ struct Settings: @unchecked Sendable {
 
     var outputFolder: URL {
         get { d.string(forKey: "outputFolder").map { URL(fileURLWithPath: $0) }
-              ?? URL(fileURLWithPath: NSHomeDirectory() + "/Recordings") }
+              ?? URL(fileURLWithPath: NSHomeDirectory() + "/Projects/BRAIN/04-meetings") }
         set { d.set(newValue.path, forKey: "outputFolder") }
     }
     var whisperModel: String {
