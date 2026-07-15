@@ -18,3 +18,14 @@ else
     codesign --force --deep --sign - "$APP"
 fi
 echo "Built $APP"
+
+# Keep the installed copy in lockstep with the freshly-signed build. Running one
+# copy while rebuilding another (esp. if that other was ad-hoc signed) orphans the
+# Screen Recording / Microphone grants and makes macOS re-prompt on every launch.
+if [ -d /Applications/MeetScribe.app ]; then
+    osascript -e 'quit app "MeetScribe"' 2>/dev/null || true
+    sleep 1
+    rm -rf /Applications/MeetScribe.app
+    cp -R "$APP" /Applications/MeetScribe.app
+    echo "Synced /Applications/MeetScribe.app"
+fi
