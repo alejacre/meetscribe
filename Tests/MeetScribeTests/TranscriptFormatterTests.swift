@@ -110,6 +110,29 @@ final class TranscriptFormatterTests: XCTestCase {
         XCTAssertNil(TranscriptFormatter.extractSummary("---\ndate: d\n---\n\n## Transcript\nno summary here"))
     }
 
+    func testDropsRepeatedFillerLoop() {
+        // The observed bug: mic track collapsed to "Yes." repeated for the whole meeting.
+        let mic = (0..<10).map { seg(Double($0 * 2), Double($0 * 2 + 1), "Yes.") }
+            + [seg(30, 33, "is there anything we can do")]
+        let filtered = TranscriptFormatter.dropHallucinations(mic)
+        XCTAssertEqual(filtered.filter { $0.text == "Yes." }.count, 1)
+        XCTAssertTrue(filtered.contains(seg(30, 33, "is there anything we can do")))
+    }
+
+    func testDropsFillerOnLongSilentSegment() {
+        // "Thank you." stretched over a dead 30s block is a silence hallucination.
+        let mic = [seg(0, 30, "Thank you."), seg(31, 33, "okay sounds good to me")]
+        let filtered = TranscriptFormatter.dropHallucinations(mic)
+        XCTAssertEqual(filtered, [seg(31, 33, "okay sounds good to me")])
+    }
+
+    func testKeepsShortRealFiller() {
+        // A genuine quick "Yes." over 1s is real speech, not a hallucination.
+        let mic = [seg(0, 1, "Yes."), seg(5, 8, "let us proceed then")]
+        let filtered = TranscriptFormatter.dropHallucinations(mic)
+        XCTAssertEqual(filtered, mic)
+    }
+
     func testEmptySegmentsSkipped() {
         let mic = [seg(0, 1, "   "), seg(2, 3, "real")]
         let md = TranscriptFormatter.format(mic: mic, system: [],

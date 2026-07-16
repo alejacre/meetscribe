@@ -40,6 +40,37 @@ enum TranscriptFormatter {
         }
     }
 
+    /// Whisper hallucinations that survive the decoder flags: short filler phrases
+    /// ("thank you", "you", "bye") emitted on long segments of near-silence, and the same
+    /// tiny phrase repeated back-to-back (a decoder loop). We only drop a filler phrase
+    /// when its segment is long relative to its text  -  real speech packs words into that
+    /// span; a lone "thank you" stretched over a 30s block does not. This runs before turn
+    /// grouping so loops never reach the output.
+    static let fillerPhrases: Set<String> = ["thank you", "thanks", "you", "bye", "okay", "yeah", "yes", "yep"]
+    /// A segment whose seconds-per-word exceeds this is too sparse to be real speech.
+    static let maxSecondsPerWord: Double = 4.0
+
+    static func dropHallucinations(_ segments: [WhisperSegment]) -> [WhisperSegment] {
+        var out: [WhisperSegment] = []
+        for seg in segments {
+            let norm = normalize(seg.text)
+            let words = norm.split(separator: " ")
+            guard !words.isEmpty else { continue }
+
+            // Filler phrase stretched over a long, sparse segment => silence hallucination.
+            if fillerPhrases.contains(norm) {
+                let secondsPerWord = (seg.end - seg.start) / Double(words.count)
+                if secondsPerWord > maxSecondsPerWord { continue }
+            }
+
+            // Consecutive identical tiny phrase => decoder repetition loop; keep first only.
+            if let last = out.last, normalize(last.text) == norm, words.count <= 2 { continue }
+
+            out.append(seg)
+        }
+        return out
+    }
+
     private static func normalize(_ text: String) -> String {
         text.lowercased()
             .filter { $0.isLetter || $0.isNumber || $0.isWhitespace }
@@ -48,7 +79,9 @@ enum TranscriptFormatter {
 
     static func format(mic: [WhisperSegment], system: [WhisperSegment], header: TranscriptHeader) -> String {
         struct Tagged { let speaker: Speaker; let seg: WhisperSegment }
-        let all = (mic.map { Tagged(speaker: .me, seg: $0) } + system.map { Tagged(speaker: .them, seg: $0) })
+        let cleanMic = dropHallucinations(mic)
+        let cleanSystem = dropHallucinations(system)
+        let all = (cleanMic.map { Tagged(speaker: .me, seg: $0) } + cleanSystem.map { Tagged(speaker: .them, seg: $0) })
             .sorted { $0.seg.start < $1.seg.start }
 
         var turns: [(speaker: Speaker, start: Double, texts: [String])] = []
