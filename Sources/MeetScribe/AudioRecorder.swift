@@ -98,6 +98,9 @@ final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
         }
         guard let export = AVAssetExportSession(asset: comp, presetName: AVAssetExportPresetAppleM4A)
         else { throw NSError(domain: "MeetScribe", code: 2, userInfo: [NSLocalizedDescriptionKey: "Cannot create export session"]) }
+        // export(to:) fails with "Cannot Save" if the destination already exists (e.g. a
+        // retry, or a reused asset dir); clear it first so the mix always writes cleanly.
+        try? FileManager.default.removeItem(at: session.mixURL)
         try await export.export(to: session.mixURL, as: .m4a)
     }
 }

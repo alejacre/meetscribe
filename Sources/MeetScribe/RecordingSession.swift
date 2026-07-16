@@ -38,14 +38,23 @@ struct RecordingSession: Sendable {
         let stamp = Self.stampFormatter.string(from: start)
         let base = "\(stamp)-\(Self.slug(appName ?? "manual"))"
         // Date-only names collide when two meetings happen the same day (or a curated
-        // note already owns the name). Probe for a free `<base>-n.md`.
-        var candidate = root.appendingPathComponent(base + ".md")
+        // note already owns the name). Probe for a free slot, checking BOTH the note and
+        // its `.assets/<base>/` dir: a recording whose transcription failed leaves the
+        // asset dir (audio) on disk but never writes the `.md`, so probing the note alone
+        // would hand the same dir to the next recording and overwrite its audio.
+        let fm = FileManager.default
+        let assetsRoot = root.appendingPathComponent(".assets", isDirectory: true)
+        func taken(_ name: String) -> Bool {
+            fm.fileExists(atPath: root.appendingPathComponent(name + ".md").path)
+                || fm.fileExists(atPath: assetsRoot.appendingPathComponent(name, isDirectory: true).path)
+        }
+        var name = base
         var n = 2
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            candidate = root.appendingPathComponent("\(base)-\(n).md")
+        while taken(name) {
+            name = "\(base)-\(n)"
             n += 1
         }
-        self.noteURL = candidate
+        self.noteURL = root.appendingPathComponent(name + ".md")
     }
 
     init(existingNote: URL, start: Date = Date()) {

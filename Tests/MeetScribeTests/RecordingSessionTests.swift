@@ -65,6 +65,27 @@ final class RecordingSessionTests: XCTestCase {
         XCTAssertEqual(s3.noteURL.lastPathComponent, "2026-07-13-zoom-3.md")
     }
 
+    func testOrphanedAssetDirForcesSuffix() throws {
+        // A recording whose transcription failed leaves .assets/<base>/ (audio) but never
+        // writes the <base>.md. The next same-day recording must NOT reuse that dir, or it
+        // overwrites the first recording's mic/system audio. Probe must check the asset dir,
+        // not just the note file.
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meetscribe-orphan-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let start = date(2026, 7, 13, 15, 30)
+
+        let s1 = RecordingSession(root: root, start: start, appName: "zoom")
+        // Only the asset dir exists (transcription failed before the .md was written).
+        try FileManager.default.createDirectory(at: s1.assetDir, withIntermediateDirectories: true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: s1.noteURL.path))
+
+        let s2 = RecordingSession(root: root, start: start, appName: "zoom")
+        XCTAssertEqual(s2.noteURL.lastPathComponent, "2026-07-13-zoom-2.md")
+        XCTAssertNotEqual(s2.assetDir.path, s1.assetDir.path)
+    }
+
     func testExistingNoteInit() {
         let url = URL(fileURLWithPath: "/tmp/recs/2026-07-13-q2-review.md")
         let s = RecordingSession(existingNote: url)
