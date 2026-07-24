@@ -14,6 +14,12 @@ final class ClaudeCleanerTests: XCTestCase {
         XCTAssertEqual(slug, "q3-budget-review")
     }
 
+    func testIsLoginFailure() {
+        XCTAssertTrue(ClaudeCleaner.isLoginFailure("Not logged in · Please run /login"))
+        XCTAssertTrue(ClaudeCleaner.isLoginFailure("Please run /login"))
+        XCTAssertFalse(ClaudeCleaner.isLoginFailure("<!-- topic: standup -->\n---\ndate: 2026-07-24"))
+    }
+
     func testNoTopicLine() {
         let (slug, body) = ClaudeCleaner.extractTopic("# Meeting transcript  -  x\nrest\n")
         XCTAssertNil(slug)

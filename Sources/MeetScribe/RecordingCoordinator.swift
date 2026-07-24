@@ -179,7 +179,7 @@ final class RecordingCoordinator: ObservableObject {
                                 body: s.basename, category: "INFO",
                                 userInfo: ["note": s.noteURL.path])
 
-                if settings.claudeCleanupEnabled, let result = ClaudeCleaner.clean(md) {
+                if settings.claudeCleanupEnabled, let result = try ClaudeCleaner.clean(md) {
                     // The prompt tells Claude not to touch the meta comment, so it still
                     // reads cleaned=false  -  patch it here.
                     md = TranscriptFormatter.markCleaned(result.markdown)
@@ -208,6 +208,13 @@ final class RecordingCoordinator: ObservableObject {
                                     body: finalNote.deletingPathExtension().lastPathComponent, category: "INFO",
                                     userInfo: ["note": finalNote.path])
                 }
+            } catch ClaudeCleaner.CleanError.notLoggedIn {
+                // Transcript is already saved; only the cleanup/rename was skipped.
+                // Retry re-runs whisper on the saved audio and then cleanup again.
+                notifier.notify(title: "Claude cleanup skipped",
+                                body: "claude CLI is not logged in  -  run `claude /login`, then Retry.",
+                                category: "TRANSCRIBE_FAILED",
+                                userInfo: ["note": s.noteURL.path])
             } catch {
                 notifier.notify(title: "Transcription failed",
                                 body: "Audio is safe. Retry? (\(error.localizedDescription))",

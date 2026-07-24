@@ -27,15 +27,30 @@ enum ClaudeCleaner {
         let topicSlug: String?
     }
 
+    enum CleanError: Error, LocalizedError {
+        case notLoggedIn
+        var errorDescription: String? {
+            "claude CLI is not logged in  -  run `claude /login`"
+        }
+    }
+
+    /// `claude -p` reports an expired/missing login as a normal-looking reply
+    /// ("Not logged in · Please run /login") rather than a distinct exit code.
+    static func isLoginFailure(_ text: String) -> Bool {
+        text.contains("Not logged in") || text.contains("Please run /login")
+    }
+
     /// Resolved once per app run  -  the binary's location can't change mid-session and
     /// the login-shell fallback is expensive (sources the full zsh profile).
     static let resolvedBinary: String? = ToolFinder.findTool("claude")
 
     /// Returns cleaned markdown + topic slug, or nil if claude is unavailable/fails
-    /// (caller falls back to the raw transcript).
-    static func clean(_ markdown: String) -> Result? {
+    /// (caller falls back to the raw transcript). Throws `CleanError.notLoggedIn` so
+    /// the caller can tell the user to re-auth instead of silently keeping the raw note.
+    static func clean(_ markdown: String) throws -> Result? {
         guard let bin = resolvedBinary else { return nil }
         let raw = try? Subprocess.run(bin, ["-p", prompt], stdin: markdown, timeout: 300)
+        if let raw, isLoginFailure(raw) { throw CleanError.notLoggedIn }
         // Sanity gate: a valid result must still carry the frontmatter and the transcript
         // body; otherwise fall back to the raw whisper note.
         guard let raw, raw.contains("date:"), raw.contains("## Transcript") else { return nil }
