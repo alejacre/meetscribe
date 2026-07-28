@@ -4,13 +4,6 @@ struct SetupView: View {
     @StateObject private var model = SetupModel()
     @Environment(\.dismiss) private var dismiss
 
-    private static let models = [
-        "mlx-community/whisper-large-v3-turbo",
-        "mlx-community/whisper-large-v3-mlx",
-        "mlx-community/whisper-medium-mlx",
-        "mlx-community/whisper-small-mlx",
-    ]
-
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -60,7 +53,7 @@ struct SetupView: View {
     private var welcomeStep: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Welcome to MeetScribe").font(.title2).bold()
-            Text("MeetScribe records your meetings and transcribes them locally on your Mac  -  no cloud, no accounts. This quick setup installs the transcription engine, downloads a model, and grants the permissions it needs.")
+            Text("MeetScribe records meetings and transcribes them locally on your Mac. Optional Claude cleanup sends a transcript to your configured Claude service only after you explicitly enable it.")
                 .foregroundStyle(.secondary)
         }
     }
@@ -97,8 +90,8 @@ struct SetupView: View {
             Picker("Model", selection: Binding(
                 get: { model.selectedModel },
                 set: { model.selectModel($0) })) {
-                ForEach(Self.models, id: \.self) { m in
-                    Text(m.replacingOccurrences(of: "mlx-community/", with: "")).tag(m)
+                ForEach(WhisperModels.all) { m in
+                    Text(m.displayName).tag(m.id)
                 }
             }
             .disabled(model.modelPhase == .working)
@@ -190,14 +183,14 @@ struct SetupView: View {
 
     private var cleanupStep: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Optionally, MeetScribe uses the Claude CLI to clean up transcripts  -  fix punctuation, remove filler words, and add a short summary.")
+            Text("Optional Claude cleanup sends the complete transcript to the service configured by your Claude CLI. MeetScribe disables Claude tools and session persistence for this request.")
                 .foregroundStyle(.secondary)
             switch model.claudeFound {
             case .some(true): Label("Claude CLI found", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
             case .some(false): Label("Claude CLI not found (cleanup will be skipped)", systemImage: "info.circle").foregroundStyle(.secondary)
             case .none: EmptyView()
             }
-            Toggle("Clean transcripts with Claude when available", isOn: Binding(
+            Toggle("Send transcripts to Claude for cleanup", isOn: Binding(
                 get: { model.claudeEnabled }, set: { model.setClaudeEnabled($0) }))
         }
     }
@@ -219,10 +212,16 @@ struct SetupView: View {
             }
             Spacer()
             if model.step == .done {
-                Button("Finish") { model.finish(); dismiss() }.buttonStyle(.borderedProminent)
+                Button("Finish") { model.finish(); dismiss() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!model.requiredSetupComplete)
             } else {
-                Button("Skip") { move(1) }.buttonStyle(.plain).foregroundStyle(.secondary)
-                Button("Continue") { move(1) }.buttonStyle(.borderedProminent)
+                if model.step == .cleanup {
+                    Button("Skip") { move(1) }.buttonStyle(.plain).foregroundStyle(.secondary)
+                }
+                Button("Continue") { move(1) }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canContinue)
             }
         }
         .padding(.horizontal, 24).padding(.vertical, 14)
@@ -233,6 +232,15 @@ struct SetupView: View {
         guard let s = SetupStep(rawValue: next) else { return }
         model.step = s
         model.onEnter(s)
+    }
+
+    private var canContinue: Bool {
+        switch model.step {
+        case .engine: if case .done = model.enginePhase { return true }; return false
+        case .model: if case .done = model.modelPhase { return true }; return false
+        case .permissions: return model.screenPerm == .granted && model.micPerm == .granted
+        default: return true
+        }
     }
 }
 

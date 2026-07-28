@@ -9,21 +9,29 @@ final class SettingsTests: XCTestCase {
         defaults.removePersistentDomain(forName: "test.meetscribe")
     }
 
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: "test.meetscribe")
+        defaults = nil
+    }
+
     func testDefaults() {
         let s = Settings(defaults: defaults)
         XCTAssertEqual(s.outputFolder.path, NSHomeDirectory() + "/Recordings")
         XCTAssertEqual(s.whisperModel, "mlx-community/whisper-large-v3-turbo")
-        XCTAssertTrue(s.claudeCleanupEnabled)
+        XCTAssertFalse(s.claudeCleanupEnabled)
+        XCTAssertFalse(s.screenPermissionRequested)
         XCTAssertTrue(s.mlxWhisperPath.hasSuffix("mlx_whisper"))
     }
 
     func testPersistence() {
         var s = Settings(defaults: defaults)
         s.outputFolder = URL(fileURLWithPath: "/tmp/recs")
-        s.claudeCleanupEnabled = false
+        s.claudeCleanupEnabled = true
+        s.screenPermissionRequested = true
         let s2 = Settings(defaults: defaults)
         XCTAssertEqual(s2.outputFolder.path, "/tmp/recs")
-        XCTAssertFalse(s2.claudeCleanupEnabled)
+        XCTAssertTrue(s2.claudeCleanupEnabled)
+        XCTAssertTrue(s2.screenPermissionRequested)
     }
 
     func testSetupCompletedDefaultsFalseAndPersists() {

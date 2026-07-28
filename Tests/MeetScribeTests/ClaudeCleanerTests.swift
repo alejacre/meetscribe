@@ -25,4 +25,116 @@ final class ClaudeCleanerTests: XCTestCase {
         XCTAssertNil(slug)
         XCTAssertTrue(body.hasPrefix("# Meeting transcript"))
     }
+
+    func testStructuralValidationAcceptsSummaryAndCleanedBody() {
+        let original = transcript("[00:00:01] **Me:** um hello")
+        let cleaned = cleanedTranscript("[00:00:01] **Me:** Hello.")
+        XCTAssertTrue(ClaudeCleaner.structurallyValid(original: original, cleaned: cleaned))
+    }
+
+    func testStructuralValidationRejectsDroppedTurn() {
+        let original = transcript("""
+        [00:00:01] **Me:** Hello.
+        [00:00:02] **Them:** Hi.
+        """)
+        let cleaned = cleanedTranscript("[00:00:01] **Me:** Hello.")
+        XCTAssertFalse(ClaudeCleaner.structurallyValid(original: original, cleaned: cleaned))
+    }
+
+    func testStructuralValidationRejectsChangedMetadata() {
+        let original = transcript("[00:00:01] **Me:** Hello.")
+        let cleaned = cleanedTranscript("[00:00:01] **Me:** Hello.")
+            .replacingOccurrences(of: "model=test", with: "model=other")
+        XCTAssertFalse(ClaudeCleaner.structurallyValid(original: original, cleaned: cleaned))
+    }
+
+    func testCleanUsesRestrictedToolFreeInvocation() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meetscribe-claude-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let executable = root.appendingPathComponent("fake-claude")
+        let argsLog = root.appendingPathComponent("args.log")
+        let envLog = root.appendingPathComponent("env.log")
+        let cleaned = """
+        <!-- topic: planning -->
+        ---
+        date: 2026-07-28
+        attendees: []
+        tags: [meeting, transcript]
+        ---
+
+        ## Summary
+
+        Greeting.
+
+        ## Transcript
+
+        [00:00:01] **Me:** Hello.
+
+        <!-- meetscribe: app=manual, duration=00:00:02, model=test, cleaned=false -->
+        """
+        let script = """
+        #!/bin/sh
+        printf '%s\\n' "$@" > "\(argsLog.path)"
+        printf '%s' "${AWS_SECRET_ACCESS_KEY-unset}" > "\(envLog.path)"
+        cat <<'MEETSCRIBE_OUTPUT'
+        \(cleaned)
+        MEETSCRIBE_OUTPUT
+        """
+        try script.write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: Int16(0o700))],
+            ofItemAtPath: executable.path)
+        setenv("AWS_SECRET_ACCESS_KEY", "must-not-leak", 1)
+        defer { unsetenv("AWS_SECRET_ACCESS_KEY") }
+
+        let result = try XCTUnwrap(ClaudeCleaner.clean(
+            transcript("[00:00:01] **Me:** um hello"),
+            binary: executable.path))
+
+        XCTAssertEqual(result.topicSlug, "planning")
+        XCTAssertTrue(result.markdown.contains("## Summary"))
+        let args = try String(contentsOf: argsLog, encoding: .utf8)
+        XCTAssertTrue(args.contains("--tools\n\n"))
+        XCTAssertTrue(args.contains("--strict-mcp-config"))
+        XCTAssertTrue(args.contains("--no-session-persistence"))
+        XCTAssertEqual(try String(contentsOf: envLog, encoding: .utf8), "unset")
+    }
+
+    private func transcript(_ body: String) -> String {
+        """
+        ---
+        date: 2026-07-28
+        attendees: []
+        tags: [meeting, transcript]
+        ---
+
+        ## Transcript
+
+        \(body)
+
+        <!-- meetscribe: app=manual, duration=00:00:02, model=test, cleaned=false -->
+        """
+    }
+
+    private func cleanedTranscript(_ body: String) -> String {
+        """
+        ---
+        date: 2026-07-28
+        attendees: []
+        tags: [meeting, transcript]
+        ---
+
+        ## Summary
+
+        Greeting.
+
+        ## Transcript
+
+        \(body)
+
+        <!-- meetscribe: app=manual, duration=00:00:02, model=test, cleaned=false -->
+        """
+    }
 }

@@ -41,4 +41,21 @@ final class SubprocessStreamTests: XCTestCase {
         _ = await task.result
         XCTAssertLessThan(Date().timeIntervalSince(start), 10, "child should die well before 60s")
     }
+
+    func testTimeoutReportsTimeoutAndKillsTermIgnoringChild() async {
+        let start = Date()
+        do {
+            for try await _ in Subprocess.stream(
+                "/bin/sh",
+                ["-c", "trap '' TERM; echo ready; sleep 30"],
+                timeout: 0.2,
+                terminationGracePeriod: 0.2) {}
+            XCTFail("expected timeout")
+        } catch let SubprocessError.timeout(value) {
+            XCTAssertEqual(value, 0.2)
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(start), 2)
+    }
 }

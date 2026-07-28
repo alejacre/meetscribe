@@ -60,6 +60,10 @@ final class SetupModel: ObservableObject {
     init() {
         let s = Settings()
         outputPath = s.outputFolder.path
+        try? FileManager.default.createDirectory(
+            at: s.outputFolder,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: NSNumber(value: Int16(0o700))])
         claudeEnabled = s.claudeCleanupEnabled
         selectedModel = s.whisperModel
     }
@@ -74,31 +78,37 @@ final class SetupModel: ObservableObject {
 
     /// Kicks off the cheap checks that don't need user action.
     func beginChecks() {
-        checkEngine()
-        checkClaude()
+        Task { await checkEngine() }
+        Task { await checkClaude() }
     }
 
     func cancelWork() { workTask?.cancel(); workTask = nil }
 
     func finish() {
-        settings.setupCompleted = true
+        settings.setupCompleted = requiredSetupComplete
     }
 
     func onEnter(_ s: SetupStep) {
         switch s {
-        case .engine: checkEngine()
+        case .engine: Task { await checkEngine() }
         case .model: checkModel()
         case .permissions: Task { await refreshPermissions() }
-        case .cleanup: checkClaude()
+        case .cleanup: Task { await checkClaude() }
         default: break
         }
     }
 
     // MARK: Engine
 
-    func checkEngine() {
+    func checkEngine() async {
         enginePhase = .checking
-        if let path = ToolFinder.findTool("mlx_whisper") {
+        let result = await Task.detached(priority: .utility) {
+            let path = ToolFinder.findTool("mlx_whisper")
+            let uv = ToolFinder.findTool("uv")
+            let list = uv.flatMap { try? Subprocess.run($0, ["tool", "list"], timeout: 30) }
+            return (path, list)
+        }.value
+        if let path = result.0, Self.isPinnedEngineList(result.1 ?? "") {
             resolvedEnginePath = path
             settings.mlxWhisperPath = path
             enginePhase = .done
@@ -107,27 +117,31 @@ final class SetupModel: ObservableObject {
         }
     }
 
-    /// Installs mlx-whisper via uv, bootstrapping uv itself if absent. Streams the
-    /// combined installer output into `engineLog` for a live view.
+    /// Installs the locked mlx-whisper version through an existing trusted uv binary.
     func installEngine() {
         cancelWork()
         engineLog = ""; engineProgress = nil; enginePhase = .working
         workTask = Task { [weak self] in
             guard let self else { return }
             do {
-                var uv = ToolFinder.findTool("uv")
+                let uv = await Task.detached(priority: .utility) {
+                    ToolFinder.findTool("uv")
+                }.value
                 if uv == nil {
-                    try await self.runLogged(
-                        "/bin/zsh", ["-c", "curl -LsSf https://astral.sh/uv/install.sh | sh"],
-                        into: \.engineLog)
-                    uv = ToolFinder.findTool("uv") ?? NSHomeDirectory() + "/.local/bin/uv"
+                    self.enginePhase = .failed(
+                        "uv is required. Install it with Homebrew or the verified package from astral.sh.")
+                    return
                 }
                 guard let uvPath = uv, FileManager.default.isExecutableFile(atPath: uvPath) else {
                     self.enginePhase = .failed("Could not install uv."); return
                 }
-                try await self.runLogged(uvPath, ["tool", "install", "mlx-whisper"], into: \.engineLog)
+                try await self.runLogged(
+                    uvPath,
+                    ["tool", "install", "--force",
+                     "mlx-whisper==\(WhisperModels.mlxWhisperVersion)"],
+                    into: \.engineLog)
                 if Task.isCancelled { return }
-                self.checkEngine()
+                await self.checkEngine()
                 if case .done = self.enginePhase {} else {
                     self.enginePhase = .failed("mlx_whisper not found after install.")
                 }
@@ -158,6 +172,11 @@ final class SetupModel: ObservableObject {
                 .appendingPathComponent("meetscribe-warm-\(UUID().uuidString)", isDirectory: true)
             defer { try? FileManager.default.removeItem(at: tmp) }
             do {
+                guard let lockedModel = WhisperModels.model(id: model) else {
+                    self.modelPhase = .failed("Select a supported model.")
+                    return
+                }
+                try await WhisperModels.verifyPublishedRevision(for: lockedModel)
                 try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
                 let wav = tmp.appendingPathComponent("silent.wav")
                 try SilentWav.write(to: wav)
@@ -179,15 +198,21 @@ final class SetupModel: ObservableObject {
     /// Maps a HF repo id to its cache dir and checks existence.
     /// `mlx-community/whisper-large-v3-turbo` → `~/.cache/huggingface/hub/models--mlx-community--whisper-large-v3-turbo`.
     nonisolated static func modelCached(_ repo: String, cacheRoot: URL? = nil) -> Bool {
-        let root = cacheRoot ?? URL(fileURLWithPath: NSHomeDirectory() + "/.cache/huggingface/hub")
-        let dir = "models--" + repo.replacingOccurrences(of: "/", with: "--")
-        return FileManager.default.fileExists(atPath: root.appendingPathComponent(dir).path)
+        WhisperModels.isCached(repo, cacheRoot: cacheRoot)
+    }
+
+    nonisolated static func isPinnedEngineList(_ output: String) -> Bool {
+        output.split(separator: "\n").contains {
+            $0.trimmingCharacters(in: .whitespaces)
+                == "mlx-whisper v\(WhisperModels.mlxWhisperVersion)"
+        }
     }
 
     // MARK: Permissions
 
     func refreshPermissions() async {
-        screenPerm = Permissions.screenRecordingGranted ? .granted : .denied
+        screenPerm = Permissions.screenRecordingGranted ? .granted
+            : settings.screenPermissionRequested ? .denied : .unknown
         switch Permissions.micStatus {
         case .authorized: micPerm = .granted
         case .notDetermined: micPerm = .unknown
@@ -200,22 +225,44 @@ final class SetupModel: ObservableObject {
         }
     }
 
-    func requestScreen() { Permissions.requestScreenRecording(); Task { await refreshPermissions() } }
+    func requestScreen() {
+        settings.screenPermissionRequested = true
+        Permissions.requestScreenRecording()
+        Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            await refreshPermissions()
+        }
+    }
     func requestMic() { Task { _ = await Permissions.requestMic(); await refreshPermissions() } }
     func requestNotifications() { Task { _ = await Permissions.requestNotifications(); await refreshPermissions() } }
 
     // MARK: Output + cleanup
 
     func setOutput(_ url: URL) {
+        try? FileManager.default.createDirectory(
+            at: url,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: NSNumber(value: Int16(0o700))])
         outputPath = url.path
         settings.outputFolder = url
     }
 
-    func checkClaude() { claudeFound = ClaudeCleaner.resolvedBinary != nil }
+    func checkClaude() async {
+        claudeFound = await Task.detached(priority: .utility) {
+            ToolFinder.findTool("claude") != nil
+        }.value
+    }
 
     func setClaudeEnabled(_ on: Bool) {
         claudeEnabled = on
         settings.claudeCleanupEnabled = on
+    }
+
+    var requiredSetupComplete: Bool {
+        guard case .done = enginePhase, case .done = modelPhase else { return false }
+        return screenPerm == .granted
+            && micPerm == .granted
+            && FileManager.default.isWritableFile(atPath: outputPath)
     }
 
     // MARK: Streaming helper

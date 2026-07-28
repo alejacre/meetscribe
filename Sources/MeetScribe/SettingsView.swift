@@ -6,16 +6,10 @@ struct SettingsView: View {
     @State private var outputPath = ""
     @State private var model = ""
     @State private var whisperPath = ""
-    @State private var cleanup = true
+    @State private var cleanup = false
     @State private var hotKeyOn = true
     @State private var launchAtLogin = false
-
-    private static let models = [
-        "mlx-community/whisper-large-v3-turbo",
-        "mlx-community/whisper-large-v3-mlx",
-        "mlx-community/whisper-medium-mlx",
-        "mlx-community/whisper-small-mlx",
-    ]
+    @State private var configurationError: String?
 
     var body: some View {
         Form {
@@ -42,14 +36,23 @@ struct SettingsView: View {
 
             Section("Transcription") {
                 Picker("Whisper model", selection: $model) {
-                    ForEach(Self.models, id: \.self) { m in
-                        Text(m.replacingOccurrences(of: "mlx-community/", with: "")).tag(m)
+                    ForEach(WhisperModels.all) { m in
+                        Text(m.displayName).tag(m.id)
                     }
-                    if !Self.models.contains(model) {
+                    if WhisperModels.model(id: model) == nil {
                         Text(model).tag(model)
                     }
                 }
-                .onChange(of: model) { _, v in settings.whisperModel = v }
+                .onChange(of: model) { old, value in
+                    guard !old.isEmpty else { return }
+                    if WhisperModels.isCached(value) {
+                        settings.whisperModel = value
+                        configurationError = nil
+                    } else {
+                        model = old
+                        configurationError = "Download that locked model in Setup Assistant first."
+                    }
+                }
 
                 LabeledContent("mlx_whisper") {
                     HStack(spacing: 8) {
@@ -70,9 +73,9 @@ struct SettingsView: View {
                     }
                 }
 
-                Toggle("Clean transcript with Claude", isOn: $cleanup)
+                Toggle("Send transcripts to Claude for cleanup", isOn: $cleanup)
                     .onChange(of: cleanup) { _, v in settings.claudeCleanupEnabled = v }
-                Text("Adds a summary, fixes punctuation, removes filler words, and names the folder after the meeting topic.")
+                Text("Sends the full transcript to your configured Claude service. Tools and session persistence are disabled.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -90,8 +93,16 @@ struct SettingsView: View {
                             else { try SMAppService.mainApp.unregister() }
                         } catch {
                             launchAtLogin = SMAppService.mainApp.status == .enabled
+                            configurationError = error.localizedDescription
                         }
                     }
+            }
+
+            if let configurationError {
+                Section {
+                    Label(configurationError, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
             }
 
             Section("Meetings") {

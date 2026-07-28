@@ -21,7 +21,7 @@ struct Settings: @unchecked Sendable {
         set { d.set(newValue, forKey: "mlxWhisperPath") }
     }
     var claudeCleanupEnabled: Bool {
-        get { d.object(forKey: "claudeCleanupEnabled") as? Bool ?? true }
+        get { d.object(forKey: "claudeCleanupEnabled") as? Bool ?? false }
         set { d.set(newValue, forKey: "claudeCleanupEnabled") }
     }
     var hotKeyEnabled: Bool {
@@ -31,5 +31,9 @@ struct Settings: @unchecked Sendable {
     var setupCompleted: Bool {
         get { d.object(forKey: "setupCompleted") as? Bool ?? false }
         set { d.set(newValue, forKey: "setupCompleted") }
+    }
+    var screenPermissionRequested: Bool {
+        get { d.object(forKey: "screenPermissionRequested") as? Bool ?? false }
+        set { d.set(newValue, forKey: "screenPermissionRequested") }
     }
 }

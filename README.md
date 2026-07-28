@@ -1,15 +1,15 @@
 # MeetScribe
 
-A tiny macOS menu bar app that records your meetings and transcribes them locally  -  no cloud, no accounts, no per-minute billing.
+A tiny macOS menu bar app that records meetings and transcribes them locally, with optional explicitly enabled Claude cleanup.
 
 MeetScribe watches for Zoom, Slack huddles, Amazon Chime, Microsoft Teams, FaceTime, and WebEx grabbing your microphone, offers to record with one click, and turns the audio into a clean, speaker-attributed Markdown transcript using [MLX Whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper) running on-device.
 
 ## Features
 
 - **Meeting detection** - polls CoreAudio for known meeting apps and offers to record via a notification action. Manual record/stop always works too.
-- **Dual-track capture** - records your mic and system audio (everyone else) as separate tracks via `ScreenCaptureKit`, so speaker attribution (`Me` / `Them`) comes from the physical source, not guesswork.
+- **Dual-track capture** - records your mic and meeting-app audio as separate tracks via `ScreenCaptureKit`, so speaker attribution (`Me` / `Them`) comes from the physical source, not guesswork. Manual recording is labeled as all-system-audio capture.
 - **Local transcription** - runs `mlx_whisper` per track, interleaves segments by timestamp, and suppresses mic-picked-up echo of the system track for people not on headphones.
-- **Optional Claude cleanup** - if the `claude` CLI is available, a headless pass fixes punctuation, removes filler words, adds a short summary, and derives a topic slug for the note filename. Falls back to the raw whisper transcript if unavailable.
+- **Optional Claude cleanup** - disabled by default. When explicitly enabled, the full transcript is sent to the service configured by the `claude` CLI. MeetScribe disables Claude tools and session persistence, validates that every timestamped speaker turn survives, and falls back to the raw transcript on failure.
 - **Obsidian-friendly output** - each recording becomes a flat Markdown note (YAML frontmatter + transcript) with audio and raw JSON tucked into a hidden `.assets/` sidecar folder, so it drops straight into a notes vault without cluttering it.
 - **Menu bar native** - no Dock icon, live elapsed-time counter, recent recordings menu, in-app transcript search, global hotkey (`⌥⇧R`) to start/stop, launch at login.
 - **First-run setup wizard** - installs the transcription engine, pre-downloads a model, and walks you through permissions on first launch. Re-openable anytime from the menu.
@@ -17,10 +17,12 @@ MeetScribe watches for Zoom, Slack huddles, Amazon Chime, Microsoft Teams, FaceT
 ## Requirements
 
 - macOS 15+ (Apple Silicon)
+- Xcode 16+ / Swift 6
 - Screen Recording and Microphone permissions (the setup wizard requests them)
+- [`uv`](https://docs.astral.sh/uv/) installed from Homebrew or a verified Astral package
 - Optional: [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`) for transcript cleanup
 
-The transcription engine ([`mlx_whisper`](https://github.com/ml-explore/mlx-examples/tree/main/whisper)) does not need to be pre-installed - the setup wizard installs it for you via [`uv`](https://docs.astral.sh/uv/) (bootstrapping `uv` itself if needed) and downloads the whisper model.
+The setup wizard installs the pinned transcription engine through `uv`. It does not execute remote installer scripts. Supported model revisions are locked and verified before download.
 
 ## Install
 
@@ -33,7 +35,9 @@ cd meetscribe
 open build/MeetScribe.app
 ```
 
-`build.sh` compiles a release build with `swift build`, assembles the `.app`, and code-signs it. It looks for a local self-signed identity named `MeetScribe Dev Signing` to keep the signature stable across rebuilds (so macOS doesn't re-ask for Screen Recording / Microphone permission every time); if that identity isn't found it falls back to an ad-hoc signature.
+`build.sh` compiles, assembles, and signs `build/MeetScribe.app`. It never modifies `/Applications`. Run `./install.sh` when you explicitly want to replace the installed copy.
+
+The build looks for a local identity named `MeetScribe Dev Signing` to keep the signature stable across development rebuilds; otherwise it uses an ad-hoc signature. Distribution releases use `scripts/release.sh`, which requires a Developer ID Application identity and notarytool profile, enables hardened runtime, notarizes and staples the app, runs Gatekeeper assessment, and emits a SHA-256 checksum.
 
 To create your own stable signing identity: open **Keychain Access** → **Certificate Assistant** → **Create a Certificate…**, name it `MeetScribe Dev Signing`, type "Code Signing".
 
@@ -41,11 +45,11 @@ To create your own stable signing identity: open **Keychain Access** → **Certi
 
 On first launch a setup wizard opens automatically and walks you through:
 
-1. **Transcription engine** - detects `mlx_whisper`; if missing, one-click installs it with `uv tool install mlx-whisper` (installing `uv` first if needed), streaming progress live.
-2. **Whisper model** - pick a model and pre-download it (~1.5 GB for the default turbo) so your first real transcription is fast.
+1. **Transcription engine** - detects `mlx_whisper`; if missing, installs the pinned version with `uv`, streaming progress live.
+2. **Whisper model** - pick a locked model revision and pre-download it (~1.5 GB for the default turbo).
 3. **Permissions** - grants Screen Recording, Microphone, and Notifications with deep links to the right System Settings panes.
 4. **Output folder** - where notes and audio are saved (point it at a notes vault if you like).
-5. **Claude cleanup** - detects the `claude` CLI and toggles the cleanup pass.
+5. **Claude cleanup** - optional explicit opt-in, with disclosure that the complete transcript leaves the Mac.
 
 Re-run it anytime from the menu bar → **Setup assistant…**.
 
@@ -56,6 +60,8 @@ Re-run it anytime from the menu bar → **Setup assistant…**.
 3. Stop recording from the menu, the notification, or `⌥⇧R`.
 4. Transcription runs in the background; a notification fires when the note is ready.
 5. Find it via **Recent recordings**, **Search transcripts…**, or directly in the output folder.
+
+Detected meetings are filtered to the selected meeting application. Manual recording captures all system audio and is labeled accordingly. Failed transcriptions remain visible in **Recent recordings** with a retry action. Recordings can be moved to Trash from the same menu.
 
 ## Output
 
@@ -97,7 +103,7 @@ Audio and raw Whisper JSON live alongside it in a hidden sidecar so they don't c
 | Output folder | Where notes and assets are written (default `~/Recordings`, change to point at a notes vault) |
 | Whisper model | Any `mlx-community/whisper-*` model |
 | `mlx_whisper` path | Location of the transcription binary |
-| Claude cleanup | Toggle the punctuation/filler/summary pass |
+| Claude cleanup | Explicit opt-in to send transcripts to the configured Claude service |
 | Global shortcut | `⌥⇧R` start/stop toggle |
 | Launch at login | via `SMAppService` |
 
@@ -123,7 +129,26 @@ Audio and raw Whisper JSON live alongside it in a hidden sidecar so they don't c
 swift test
 ```
 
-Unit tests cover transcript formatting, echo suppression, note-path conventions, settings persistence, the WAV builder, subprocess streaming, and the wizard's model-cache mapping / progress parsing / log handling.
+Unit tests cover recording startup cancellation, failed-recording recovery, transactional finalization, file permissions, real Whisper invocation boundaries, transcript validation, formatter behavior, subprocess process-tree timeout/cancellation, model locks, settings, and setup helpers. CI runs warning-free debug and release builds plus coverage.
+
+## Release
+
+Create a notarized release:
+
+```bash
+CODESIGN_IDENTITY="Developer ID Application: Example (TEAMID)" \
+NOTARY_PROFILE="meetscribe-notary" \
+VERSION="1.1.0" \
+scripts/release.sh
+```
+
+The script produces `build/MeetScribe-<version>.zip` and a matching `.sha256`.
+
+## Privacy
+
+Audio, raw Whisper JSON, and Markdown transcripts are stored locally with owner-only permissions and retained until you move the recording to Trash. Selecting a synced output folder can upload those files through that provider. Notification text is generic.
+
+Local Whisper transcription does not use a cloud service. Claude cleanup is a separate, disabled-by-default feature that sends the complete transcript to the service configured by the user's Claude CLI.
 
 ## Non-goals
 

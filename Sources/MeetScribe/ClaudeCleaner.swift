@@ -29,8 +29,14 @@ enum ClaudeCleaner {
 
     enum CleanError: Error, LocalizedError {
         case notLoggedIn
+        case invalidOutput
         var errorDescription: String? {
-            "claude CLI is not logged in  -  run `claude /login`"
+            switch self {
+            case .notLoggedIn:
+                "claude CLI is not logged in  -  run `claude /login`"
+            case .invalidOutput:
+                "Claude returned an incomplete or structurally unsafe transcript"
+            }
         }
     }
 
@@ -40,21 +46,20 @@ enum ClaudeCleaner {
         text.contains("Not logged in") || text.contains("Please run /login")
     }
 
-    /// Resolved once per app run  -  the binary's location can't change mid-session and
-    /// the login-shell fallback is expensive (sources the full zsh profile).
-    static let resolvedBinary: String? = ToolFinder.findTool("claude")
-
-    /// Returns cleaned markdown + topic slug, or nil if claude is unavailable/fails
-    /// (caller falls back to the raw transcript). Throws `CleanError.notLoggedIn` so
-    /// the caller can tell the user to re-auth instead of silently keeping the raw note.
-    static func clean(_ markdown: String) throws -> Result? {
-        guard let bin = resolvedBinary else { return nil }
-        let raw = try? Subprocess.run(bin, ["-p", prompt], stdin: markdown, timeout: 300)
-        if let raw, isLoginFailure(raw) { throw CleanError.notLoggedIn }
-        // Sanity gate: a valid result must still carry the frontmatter and the transcript
-        // body; otherwise fall back to the raw whisper note.
-        guard let raw, raw.contains("date:"), raw.contains("## Transcript") else { return nil }
+    /// Returns cleaned markdown + topic slug, or nil if claude is unavailable.
+    static func clean(_ markdown: String, binary: String? = nil) throws -> Result? {
+        guard let bin = binary ?? ToolFinder.findTool("claude") else { return nil }
+        let raw = try Subprocess.run(
+            bin,
+            ["-p", "--tools", "", "--strict-mcp-config", "--no-session-persistence", prompt],
+            stdin: markdown,
+            timeout: 300,
+            environment: Subprocess.restrictedEnvironment)
+        if isLoginFailure(raw) { throw CleanError.notLoggedIn }
         let (slug, body) = extractTopic(raw)
+        guard structurallyValid(original: markdown, cleaned: body) else {
+            throw CleanError.invalidOutput
+        }
         return Result(markdown: body, topicSlug: slug)
     }
 
@@ -69,5 +74,37 @@ enum ClaudeCleaner {
         lines.removeFirst()
         let body = lines.joined(separator: "\n").trimmingCharacters(in: .newlines) + "\n"
         return (slug.isEmpty ? nil : String(slug), body)
+    }
+
+    static func structurallyValid(original: String, cleaned: String) -> Bool {
+        guard let summary = cleaned.range(of: "## Summary"),
+              let transcript = cleaned.range(of: "## Transcript"),
+              summary.lowerBound < transcript.lowerBound,
+              frontmatter(in: original) == frontmatter(in: cleaned),
+              metadataComment(in: original) == metadataComment(in: cleaned)
+        else { return false }
+        return turnMarkers(in: original) == turnMarkers(in: cleaned)
+    }
+
+    private static func frontmatter(in markdown: String) -> String? {
+        let lines = markdown.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.first == "---",
+              let closing = lines.dropFirst().firstIndex(of: "---")
+        else { return nil }
+        return lines[...closing].joined(separator: "\n")
+    }
+
+    private static func metadataComment(in markdown: String) -> String? {
+        markdown.split(separator: "\n").map(String.init)
+            .first { $0.hasPrefix("<!-- meetscribe:") && $0.hasSuffix("-->") }
+    }
+
+    private static func turnMarkers(in markdown: String) -> [String] {
+        let pattern = #"\[\d{2}:\d{2}:\d{2}\] \*\*(?:Me|Them):\*\*"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(markdown.startIndex..., in: markdown)
+        return regex.matches(in: markdown, range: range).compactMap {
+            Range($0.range, in: markdown).map { String(markdown[$0]) }
+        }
     }
 }

@@ -92,5 +92,23 @@ final class RecordingSessionTests: XCTestCase {
         XCTAssertEqual(s.noteURL, url)
         XCTAssertEqual(s.basename, "2026-07-13-q2-review")
         XCTAssertEqual(s.micURL.path, "/tmp/recs/.assets/2026-07-13-q2-review/mic.m4a")
+        XCTAssertEqual(RecordingSession.headerDateFormatter.string(from: s.start), "2026-07-13")
+    }
+
+    func testCreatesPrivateAssetDirectoryAndFiles() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meetscribe-permissions-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = RecordingSession(root: root, start: date(2026, 7, 13, 9, 5), appName: nil)
+        try session.createFolder()
+        try Data("private".utf8).write(to: session.transcriptJSON)
+        try session.secureFile(session.transcriptJSON)
+
+        let directoryMode = try XCTUnwrap(
+            FileManager.default.attributesOfItem(atPath: session.assetDir.path)[.posixPermissions] as? NSNumber)
+        let fileMode = try XCTUnwrap(
+            FileManager.default.attributesOfItem(atPath: session.transcriptJSON.path)[.posixPermissions] as? NSNumber)
+        XCTAssertEqual(directoryMode.intValue & 0o777, 0o700)
+        XCTAssertEqual(fileMode.intValue & 0o777, 0o600)
     }
 }

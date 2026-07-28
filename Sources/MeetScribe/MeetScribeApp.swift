@@ -23,11 +23,17 @@ struct MeetScribeApp: App {
         MenuBarExtra {
             switch state.phase {
             case .idle:
-                Button("Start recording") { Task { await coordinator.startRecording() } }
+                Button("Start manual recording (all system audio)") {
+                    Task { await coordinator.startRecording() }
+                }
+            case .starting:
+                Button("Cancel recording startup") { Task { await coordinator.stopRecording() } }
             case .recording:
                 Button("Stop recording (\(TranscriptFormatter.hms(Double(state.elapsedSeconds))))") {
                     Task { await coordinator.stopRecording() }
                 }
+            case .stopping:
+                Text("Stopping recording…")
             }
             if state.transcribingCount > 0 {
                 Text(state.transcribingCount == 1 ? "Transcribing 1 recording…"
@@ -49,20 +55,27 @@ struct MeetScribeApp: App {
             Divider()
             if !state.recentRecordings.isEmpty {
                 Menu("Recent recordings") {
-                    ForEach(state.recentRecordings, id: \.self) { url in
-                        let rec = RecordingSession(existingNote: url)
-                        let hasTranscript = FileManager.default.fileExists(atPath: rec.transcriptMD.path)
-                        Menu(rec.basename) {
-                            Button("Open transcript") { NSWorkspace.shared.open(rec.transcriptMD) }
-                                .disabled(!hasTranscript)
-                            Button("Copy summary") { copySummary(rec) }
-                                .disabled(!hasTranscript)
-                            if !hasTranscript {
-                                Button("Retry transcription") { coordinator.retryTranscription(note: url) }
+                    ForEach(state.recentRecordings) { record in
+                        let session = RecordingSession(existingNote: record.noteURL)
+                        Menu(record.basename) {
+                            Button("Open transcript") { NSWorkspace.shared.open(record.noteURL) }
+                                .disabled(!record.hasTranscript)
+                            Button("Copy summary") { copySummary(session) }
+                                .disabled(!record.hasTranscript)
+                            if !record.hasTranscript {
+                                Button("Retry transcription") {
+                                    coordinator.retryTranscription(note: record.noteURL)
+                                }
                             }
-                            Button("Play audio") { NSWorkspace.shared.open(rec.mixURL) }
-                                .disabled(!FileManager.default.fileExists(atPath: rec.mixURL.path))
-                            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                            Button("Play audio") { NSWorkspace.shared.open(session.mixURL) }
+                                .disabled(!FileManager.default.fileExists(atPath: session.mixURL.path))
+                            Button("Show in Finder") {
+                                NSWorkspace.shared.activateFileViewerSelecting([
+                                    record.hasTranscript ? record.noteURL : record.assetDir
+                                ])
+                            }
+                            Divider()
+                            Button("Move recording to Trash") { coordinator.moveToTrash(record) }
                         }
                     }
                 }
@@ -90,6 +103,7 @@ struct MeetScribeApp: App {
             }
         } label: {
             Image(systemName: iconName)
+                .accessibilityLabel(menuBarAccessibilityLabel)
         }
         SwiftUI.Settings { SettingsView() }
         Window("Search transcripts", id: "search") { SearchView() }
@@ -120,7 +134,17 @@ struct MeetScribeApp: App {
     private var iconName: String {
         switch state.phase {
         case .recording: return "record.circle.fill"
+        case .starting, .stopping: return "hourglass"
         case .idle: return state.transcribingCount > 0 ? "hourglass" : "waveform"
+        }
+    }
+
+    private var menuBarAccessibilityLabel: String {
+        switch state.phase {
+        case .idle: state.transcribingCount > 0 ? "MeetScribe transcribing" : "MeetScribe idle"
+        case .starting: "MeetScribe starting recording"
+        case .recording: "MeetScribe recording"
+        case .stopping: "MeetScribe stopping recording"
         }
     }
 

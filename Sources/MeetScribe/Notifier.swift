@@ -5,6 +5,7 @@ import UserNotifications
 final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     var onRecordAction: (() -> Void)?
     var onRetryAction: ((URL) -> Void)?
+    var isEnabled = true
 
     /// Wires the delegate and notification categories. Does NOT request authorization:
     /// on first run the setup wizard asks (sequenced with the other permissions);
@@ -23,6 +24,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
     }
 
     func notify(title: String, body: String, category: String, userInfo: [String: String] = [:]) {
+        guard isEnabled else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
@@ -49,15 +51,25 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
         switch response.actionIdentifier {
         case "RECORD": onRecordAction?()
         case "RETRY":
-            if let path = response.notification.request.content.userInfo["note"] as? String {
-                onRetryAction?(URL(fileURLWithPath: path))
+            if let note = noteURL(from: response.notification.request.content.userInfo) {
+                onRetryAction?(note)
             }
         case UNNotificationDefaultActionIdentifier:
             // Tap on the notification body: open the meeting note if it has one.
-            if let path = response.notification.request.content.userInfo["note"] as? String {
-                NSWorkspace.shared.open(URL(fileURLWithPath: path))
+            if let note = noteURL(from: response.notification.request.content.userInfo) {
+                let session = RecordingSession(existingNote: note)
+                NSWorkspace.shared.open(
+                    FileManager.default.fileExists(atPath: note.path) ? note : session.assetDir)
             }
         default: break
         }
+    }
+
+    private func noteURL(from userInfo: [AnyHashable: Any]) -> URL? {
+        guard let basename = userInfo["recording"] as? String,
+              basename == URL(fileURLWithPath: basename).lastPathComponent,
+              !basename.contains("/")
+        else { return nil }
+        return Settings().outputFolder.appendingPathComponent(basename + ".md")
     }
 }

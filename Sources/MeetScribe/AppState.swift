@@ -2,7 +2,9 @@ import Foundation
 
 enum AppPhase: Equatable {
     case idle
+    case starting
     case recording
+    case stopping
 }
 
 @MainActor
@@ -13,5 +15,5 @@ final class AppState: ObservableObject {
     @Published var lastError: String?
     @Published var showPermissionHelp: Bool = false
     @Published var isQuitting: Bool = false
-    @Published var recentRecordings: [URL] = []
+    @Published var recentRecordings: [RecordingRecord] = []
 }

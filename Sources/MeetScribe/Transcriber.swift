@@ -1,22 +1,40 @@
 import Foundation
 
+struct TranscriptionTracks: Sendable {
+    let mic: [WhisperSegment]
+    let system: [WhisperSegment]
+}
+
 struct Transcriber {
     let mlxWhisperPath: String
     let model: String
+    private let modelResolver: @Sendable (String) -> String?
+
+    init(mlxWhisperPath: String, model: String,
+         modelResolver: @escaping @Sendable (String) -> String? = WhisperModels.resolvedPath) {
+        self.mlxWhisperPath = mlxWhisperPath
+        self.model = model
+        self.modelResolver = modelResolver
+    }
 
     /// Transcribes each audio file in its OWN mlx_whisper invocation, forcing a distinct
     /// --output-name per file. Do NOT batch multiple files into one invocation: mlx_whisper
     /// 0.4.3 overwrites the first file's JSON with the last file's output (verified),
     /// which silently destroys the per-track Me/Them attribution.
-    /// Returns segments per input, in the same order; missing files yield [].
-    func transcribe(_ audios: [URL]) throws -> [[WhisperSegment]] {
-        try audios.map { audio in
+    func transcribe(mic: URL, system: URL) throws -> TranscriptionTracks {
+        TranscriptionTracks(mic: try transcribe(mic), system: try transcribe(system))
+    }
+
+    private func transcribe(_ audio: URL) throws -> [WhisperSegment] {
             guard FileManager.default.fileExists(atPath: audio.path) else { return [] }
+            guard let modelPath = modelResolver(model) else {
+                throw TranscriberError.modelNotCached(model)
+            }
             let dir = audio.deletingLastPathComponent()
             let name = audio.deletingPathExtension().lastPathComponent
             try Subprocess.run(mlxWhisperPath, [
                 audio.path,
-                "--model", model,
+                "--model", modelPath,
                 "--output-format", "json",
                 "--output-dir", dir.path,
                 "--output-name", name,
@@ -24,7 +42,6 @@ struct Transcriber {
             let jsonURL = dir.appendingPathComponent(name + ".json")
             defer { try? FileManager.default.removeItem(at: jsonURL) }
             return try Self.parseSegments(Data(contentsOf: jsonURL))
-        }
     }
 
     /// Decoder flags that stop Whisper from hallucinating on quiet tracks. The mic track
@@ -45,5 +62,16 @@ struct Transcriber {
     static func parseSegments(_ data: Data) throws -> [WhisperSegment] {
         struct Root: Codable { let segments: [WhisperSegment] }
         return try JSONDecoder().decode(Root.self, from: data).segments
+    }
+
+    enum TranscriberError: Error, LocalizedError {
+        case modelNotCached(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .modelNotCached(let model):
+                "The locked model \(model) is not fully downloaded. Run Setup Assistant."
+            }
+        }
     }
 }

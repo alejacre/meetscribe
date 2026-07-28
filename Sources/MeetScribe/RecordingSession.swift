@@ -57,9 +57,10 @@ struct RecordingSession: Sendable {
         self.noteURL = root.appendingPathComponent(name + ".md")
     }
 
-    init(existingNote: URL, start: Date = Date()) {
+    init(existingNote: URL, start: Date? = nil) {
         self.noteURL = existingNote
-        self.start = start
+        let datePart = String(existingNote.deletingPathExtension().lastPathComponent.prefix(10))
+        self.start = start ?? Self.headerDateFormatter.date(from: datePart) ?? Date()
         self.appName = nil
     }
 
@@ -83,5 +84,22 @@ struct RecordingSession: Sendable {
 
     func createFolder() throws {
         try FileManager.default.createDirectory(at: assetDir, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: Int16(0o700))],
+            ofItemAtPath: assetDir.path)
+    }
+
+    func secureFile(_ url: URL) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: Int16(0o600))],
+            ofItemAtPath: url.path)
+    }
+
+    func removeAssetDirectoryIfEmpty() {
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(atPath: assetDir.path),
+              contents.isEmpty else { return }
+        try? fm.removeItem(at: assetDir)
     }
 }

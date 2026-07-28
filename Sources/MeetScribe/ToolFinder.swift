@@ -17,6 +17,9 @@ enum ToolFinder {
     ]
 
     static func findTool(_ name: String) -> String? {
+        guard !name.isEmpty,
+              name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" })
+        else { return nil }
         for dir in candidateDirs {
             let path = dir + "/" + name
             if FileManager.default.isExecutableFile(atPath: path) { return path }

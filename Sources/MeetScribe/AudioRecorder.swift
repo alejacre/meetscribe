@@ -2,18 +2,30 @@ import Foundation
 import ScreenCaptureKit
 import AVFoundation
 
-final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+protocol AudioRecording: AnyObject, Sendable {
+    var sourceWarning: String? { get }
+    var onStreamDied: ((Error) -> Void)? { get set }
+    func start(session: RecordingSession, targetBundleID: String?) async throws
+    func stop() async throws
+}
+
+final class AudioRecorder: NSObject, AudioRecording, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     private var stream: SCStream?
     private var micFile: AVAudioFile?
     private var systemFile: AVAudioFile?
     private var session: RecordingSession?
     private let queue = DispatchQueue(label: "meetscribe.audio")
+    private let stateLock = NSLock()
     private(set) var sourceWarning: String?
     /// Fired when the capture stream dies out from under us (display sleep,
     /// permission revoked); audio written so far stays on disk.
-    var onStreamDied: ((Error) -> Void)?
+    private var streamDiedHandler: ((Error) -> Void)?
+    var onStreamDied: ((Error) -> Void)? {
+        get { stateLock.withLock { streamDiedHandler } }
+        set { stateLock.withLock { streamDiedHandler = newValue } }
+    }
 
-    func start(session: RecordingSession) async throws {
+    func start(session: RecordingSession, targetBundleID: String? = nil) async throws {
         try session.createFolder()
         self.session = session
         let content = try await SCShareableContent.current
@@ -21,7 +33,20 @@ final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
             throw NSError(domain: "MeetScribe", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: "No display found (screen recording permission?)"])
         }
-        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let filter: SCContentFilter
+        if let targetBundleID {
+            guard let app = content.applications.first(where: { $0.bundleIdentifier == targetBundleID }) else {
+                throw NSError(
+                    domain: "MeetScribe",
+                    code: 3,
+                    userInfo: [NSLocalizedDescriptionKey:
+                        "The meeting app is no longer available as an audio source."])
+            }
+            filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
+        } else {
+            // Manual recording is explicitly presented as all-system-audio capture.
+            filter = SCContentFilter(display: display, excludingWindows: [])
+        }
         let config = SCStreamConfiguration()
         config.capturesAudio = true
         config.excludesCurrentProcessAudio = true
@@ -36,21 +61,40 @@ final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
         try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: queue)
-        try await stream.startCapture()
-        self.stream = stream
+        stateLock.withLock { self.stream = stream }
+        do {
+            try await stream.startCapture()
+        } catch {
+            stateLock.withLock { self.stream = nil }
+            throw error
+        }
     }
 
     func stop() async throws {
-        try await stream?.stopCapture()
-        stream = nil
+        let active = stateLock.withLock {
+            let active = stream
+            stream = nil
+            return active
+        }
+        var stopError: Error?
+        do { try await active?.stopCapture() }
+        catch { stopError = error }
         queue.sync { micFile = nil; systemFile = nil } // flush/close
+        if let session {
+            try session.secureFile(session.micURL)
+            try session.secureFile(session.systemURL)
+        }
+        if let stopError { throw stopError }
     }
 
     // MARK: SCStreamDelegate
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        guard self.stream != nil else { return } // ignore expected stop()
-        self.stream = nil
-        onStreamDied?(error)
+        let callback = stateLock.withLock {
+            guard self.stream != nil else { return nil as ((Error) -> Void)? }
+            self.stream = nil
+            return streamDiedHandler
+        }
+        callback?(error)
     }
 
     // MARK: SCStreamOutput
@@ -76,12 +120,16 @@ final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
     }
 
     private func makeFile(url: URL, format: AVAudioFormat) throws -> AVAudioFile {
-        try AVAudioFile(forWriting: url, settings: [
+        let file = try AVAudioFile(forWriting: url, settings: [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: format.sampleRate,
             AVNumberOfChannelsKey: format.channelCount,
             AVEncoderBitRateKey: 64_000,
         ], commonFormat: format.commonFormat, interleaved: format.isInterleaved)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: Int16(0o600))],
+            ofItemAtPath: url.path)
+        return file
     }
 
     /// Offline mix mic + system into audio.m4a after stop.
@@ -102,6 +150,7 @@ final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
         // retry, or a reused asset dir); clear it first so the mix always writes cleanly.
         try? FileManager.default.removeItem(at: session.mixURL)
         try await export.export(to: session.mixURL, as: .m4a)
+        try session.secureFile(session.mixURL)
     }
 }
 

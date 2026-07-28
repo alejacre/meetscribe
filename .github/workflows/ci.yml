@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: swift --version
+      - name: Strict build
+        run: swift build -Xswiftc -warnings-as-errors
+      - name: Tests with coverage
+        run: scripts/check-coverage.sh
+      - name: Release build
+        run: swift build -c release -Xswiftc -warnings-as-errors
+      - name: Validate metadata and scripts
+        run: |
+          plutil -lint Info.plist MeetScribe.entitlements
+          bash -n build.sh install.sh scripts/release.sh scripts/check-coverage.sh

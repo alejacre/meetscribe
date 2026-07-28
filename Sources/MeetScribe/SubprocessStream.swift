@@ -10,7 +10,8 @@ extension Subprocess {
     /// `SubprocessError.timeout`. Cancelling the consuming Task (e.g. closing the
     /// wizard window) terminates the child: SIGTERM, then SIGKILL after 5s.
     static func stream(_ executable: String, _ args: [String],
-                       timeout: TimeInterval = 3600) -> AsyncThrowingStream<String, Error> {
+                       timeout: TimeInterval = 3600,
+                       terminationGracePeriod: TimeInterval = 5) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             _ = ignoreSigpipe
             let p = makeProcess(executable, args)
@@ -21,6 +22,7 @@ extension Subprocess {
             // Keep the last ~4KB so a non-zero exit can report meaningful context,
             // mirroring the synchronous run()'s stderr surfacing.
             let tail = Tail()
+            let completion = StreamCompletion()
             let handle = pipe.fileHandleForReading
             handle.readabilityHandler = { h in
                 let chunk = h.availableData
@@ -32,7 +34,15 @@ extension Subprocess {
 
             p.terminationHandler = { proc in
                 handle.readabilityHandler = nil
-                if proc.terminationStatus == 0 {
+                let finalData = handle.readDataToEndOfFile()
+                if !finalData.isEmpty {
+                    let text = String(decoding: finalData, as: UTF8.self)
+                    tail.append(text)
+                    continuation.yield(text)
+                }
+                if completion.timedOut {
+                    continuation.finish(throwing: SubprocessError.timeout(timeout))
+                } else if proc.terminationStatus == 0 {
                     continuation.finish()
                 } else {
                     continuation.finish(throwing: SubprocessError.nonZeroExit(
@@ -42,9 +52,9 @@ extension Subprocess {
 
             continuation.onTermination = { reason in
                 if case .cancelled = reason, p.isRunning {
-                    p.terminate()
-                    DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
-                        if p.isRunning { kill(p.processIdentifier, SIGKILL) }
+                    signalProcessTree(p, SIGTERM)
+                    DispatchQueue.global().asyncAfter(deadline: .now() + terminationGracePeriod) {
+                        signalProcessTree(p, SIGKILL)
                     }
                 }
             }
@@ -56,7 +66,12 @@ extension Subprocess {
             // the stream. Only fires if the process outlives the budget.
             if timeout.isFinite {
                 DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-                    if p.isRunning { p.terminate() }
+                    guard p.isRunning else { return }
+                    completion.markTimedOut()
+                    signalProcessTree(p, SIGTERM)
+                    DispatchQueue.global().asyncAfter(deadline: .now() + terminationGracePeriod) {
+                        signalProcessTree(p, SIGKILL)
+                    }
                 }
             }
         }
@@ -73,5 +88,22 @@ extension Subprocess {
             if buf.count > limit { buf = String(buf.suffix(limit)) }
         }
         var contents: String { lock.lock(); defer { lock.unlock() }; return buf }
+    }
+
+    private final class StreamCompletion: @unchecked Sendable {
+        private var didTimeOut = false
+        private let lock = NSLock()
+
+        func markTimedOut() {
+            lock.lock()
+            didTimeOut = true
+            lock.unlock()
+        }
+
+        var timedOut: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return didTimeOut
+        }
     }
 }

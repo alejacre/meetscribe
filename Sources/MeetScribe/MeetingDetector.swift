@@ -10,6 +10,7 @@ struct DetectedMeeting: Equatable {
     let appName: String
 }
 
+@MainActor
 final class MeetingDetector {
     static let knownApps: [String: String] = [
         "us.zoom.xos": "zoom",
@@ -30,7 +31,7 @@ final class MeetingDetector {
 
     func startPolling(interval: TimeInterval = 1.5) {
         let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
-            self?.poll()
+            Task { @MainActor in self?.poll() }
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t

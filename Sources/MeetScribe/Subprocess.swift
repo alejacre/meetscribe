@@ -46,22 +46,43 @@ enum Subprocess {
     /// Builds a Process with the widened PATH both `run` and `stream` need.
     /// Apps launched from Finder get a minimal PATH; tools like mlx_whisper
     /// shell out to ffmpeg and need Homebrew/user paths visible.
-    static func makeProcess(_ executable: String, _ args: [String]) -> Process {
+    static func makeProcess(_ executable: String, _ args: [String],
+                            environment: [String: String]? = nil) -> Process {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: executable)
         p.arguments = args
-        var env = ProcessInfo.processInfo.environment
+        var env = environment ?? ProcessInfo.processInfo.environment
         let extra = ["/opt/homebrew/bin", "/usr/local/bin", NSHomeDirectory() + "/.local/bin"]
         env["PATH"] = (extra + [(env["PATH"] ?? "/usr/bin:/bin")]).joined(separator: ":")
         p.environment = env
         return p
     }
 
+    static var restrictedEnvironment: [String: String] {
+        var env = [
+            "HOME": NSHomeDirectory(),
+            "PATH": "/usr/bin:/bin",
+            "TMPDIR": NSTemporaryDirectory(),
+            "LANG": "en_US.UTF-8",
+        ]
+        if let user = ProcessInfo.processInfo.environment["USER"] { env["USER"] = user }
+        return env
+    }
+
+    static func signalProcessTree(_ process: Process, _ signal: Int32) {
+        let pid = process.processIdentifier
+        guard pid > 0 else { return }
+        if kill(-pid, signal) != 0 {
+            kill(pid, signal)
+        }
+    }
+
     @discardableResult
     static func run(_ executable: String, _ args: [String], stdin: String? = nil,
-                    timeout: TimeInterval = 1800) throws -> String {
+                    timeout: TimeInterval = 1800,
+                    environment: [String: String]? = nil) throws -> String {
         _ = ignoreSigpipe
-        let p = makeProcess(executable, args)
+        let p = makeProcess(executable, args, environment: environment)
         let out = Pipe(), err = Pipe()
         p.standardOutput = out
         p.standardError = err
@@ -79,9 +100,9 @@ enum Subprocess {
             try? inPipe.fileHandleForWriting.close()
         }
         if exited.wait(timeout: .now() + timeout) == .timedOut {
-            p.terminate()
+            signalProcessTree(p, SIGTERM)
             if exited.wait(timeout: .now() + 5) == .timedOut {
-                kill(p.processIdentifier, SIGKILL)
+                signalProcessTree(p, SIGKILL)
                 exited.wait()
             }
             throw SubprocessError.timeout(timeout)
