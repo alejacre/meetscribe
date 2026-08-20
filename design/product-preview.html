@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MeetScribe product preview source</title>
+  <style>
+    :root {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      color: #171a22;
+      letter-spacing: 0;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 1800px;
+      height: 1100px;
+      margin: 0;
+      overflow: hidden;
+    }
+
+    body {
+      position: relative;
+      background: #151923;
+    }
+
+    .desktop {
+      position: absolute;
+      inset: 0;
+      background: #202631;
+    }
+
+    .desktop::before,
+    .desktop::after {
+      content: "";
+      position: absolute;
+      background: #2a3240;
+    }
+
+    .desktop::before {
+      inset: 32px auto 0 440px;
+      width: 1px;
+    }
+
+    .desktop::after {
+      inset: 32px 0 auto 0;
+      height: 1px;
+    }
+
+    .menu-bar {
+      position: absolute;
+      inset: 0 0 auto;
+      z-index: 10;
+      height: 46px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      color: #f5f6f8;
+      background: rgba(17, 20, 27, 0.96);
+      border-bottom: 1px solid #3a414e;
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .menu-left,
+    .menu-right {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+    }
+
+    .apple {
+      font-size: 19px;
+    }
+
+    .menu-right {
+      gap: 18px;
+      color: #e5e8ed;
+    }
+
+    .status-wave {
+      width: 28px;
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      border-radius: 5px;
+      background: #f84b43;
+    }
+
+    .status-wave span {
+      width: 2px;
+      border-radius: 2px;
+      background: #fff;
+    }
+
+    .status-wave span:nth-child(1),
+    .status-wave span:nth-child(5) {
+      height: 7px;
+    }
+
+    .status-wave span:nth-child(2),
+    .status-wave span:nth-child(4) {
+      height: 13px;
+    }
+
+    .status-wave span:nth-child(3) {
+      height: 18px;
+    }
+
+    .workspace-label {
+      position: absolute;
+      top: 112px;
+      left: 84px;
+      width: 420px;
+      color: #f0f2f5;
+    }
+
+    .workspace-label img {
+      width: 76px;
+      height: 76px;
+      border-radius: 17px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.28);
+    }
+
+    .workspace-label h1 {
+      margin: 24px 0 0;
+      font-size: 62px;
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    .workspace-label p {
+      margin: 18px 0 0;
+      color: #aeb6c3;
+      font-size: 20px;
+      line-height: 1.5;
+    }
+
+    .privacy-state {
+      margin: 30px 0 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 13px;
+      color: #bce8df;
+      border: 1px solid #4f776f;
+      border-radius: 7px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .privacy-state::before {
+      content: "";
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #75d8c8;
+    }
+
+    .window {
+      position: absolute;
+      overflow: hidden;
+      background: #f7f8fa;
+      border: 1px solid #5a6270;
+      border-radius: 10px;
+      box-shadow: 0 38px 90px rgba(0, 0, 0, 0.45);
+    }
+
+    .editor-window {
+      top: 102px;
+      left: 525px;
+      width: 1150px;
+      height: 860px;
+    }
+
+    .titlebar {
+      height: 54px;
+      display: grid;
+      grid-template-columns: 120px minmax(0, 1fr) 120px;
+      align-items: center;
+      background: #f0f1f4;
+      border-bottom: 1px solid #d1d5dc;
+    }
+
+    .traffic-lights {
+      display: flex;
+      gap: 9px;
+      padding-left: 19px;
+    }
+
+    .traffic-lights i {
+      width: 13px;
+      height: 13px;
+      display: block;
+      border-radius: 50%;
+    }
+
+    .traffic-lights i:nth-child(1) {
+      background: #ff5f57;
+    }
+
+    .traffic-lights i:nth-child(2) {
+      background: #febc2e;
+    }
+
+    .traffic-lights i:nth-child(3) {
+      background: #28c840;
+    }
+
+    .titlebar strong {
+      overflow: hidden;
+      font-size: 14px;
+      text-align: center;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .titlebar span {
+      padding-right: 18px;
+      color: #69717e;
+      font-size: 12px;
+      text-align: right;
+    }
+
+    .editor-body {
+      height: calc(100% - 54px);
+      display: grid;
+      grid-template-columns: 235px minmax(0, 1fr);
+    }
+
+    .sidebar {
+      padding: 22px 14px;
+      background: #e8eaee;
+      border-right: 1px solid #cfd3da;
+    }
+
+    .sidebar-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 10px 18px;
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .sidebar-head img {
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
+    }
+
+    .folder-label {
+      margin: 13px 10px 7px;
+      color: #747b87;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .file {
+      display: block;
+      padding: 9px 10px;
+      color: #424955;
+      border-radius: 6px;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .file.active {
+      color: #fff;
+      background: #353b47;
+    }
+
+    .note {
+      padding: 48px 58px 64px;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .note h2 {
+      margin: 0;
+      font-size: 38px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .metadata {
+      display: flex;
+      gap: 9px;
+      margin: 16px 0 34px;
+    }
+
+    .metadata span {
+      padding: 5px 8px;
+      color: #57606e;
+      background: #eef0f3;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .note h3 {
+      margin: 30px 0 12px;
+      font-size: 20px;
+      letter-spacing: 0;
+    }
+
+    .note p,
+    .note li {
+      color: #434a56;
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    .note ul {
+      margin: 0;
+      padding-left: 22px;
+    }
+
+    .transcript {
+      margin-top: 14px;
+      border-top: 1px solid #e2e5e9;
+    }
+
+    .turn {
+      display: grid;
+      grid-template-columns: 72px 64px minmax(0, 1fr);
+      gap: 10px;
+      padding: 12px 0;
+      border-bottom: 1px solid #eceef1;
+      color: #3d4450;
+      font-size: 14px;
+    }
+
+    .turn time {
+      color: #8a909a;
+      font-family: "SFMono-Regular", Menlo, monospace;
+      font-size: 12px;
+    }
+
+    .turn strong {
+      color: #0f766e;
+    }
+
+    .menu-popover {
+      position: absolute;
+      top: 45px;
+      right: 66px;
+      z-index: 20;
+      width: 410px;
+      padding: 7px;
+      color: #1c2027;
+      background: rgba(249, 249, 250, 0.98);
+      border: 1px solid #9da3ad;
+      border-radius: 10px;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+      font-size: 14px;
+    }
+
+    .menu-row {
+      min-height: 34px;
+      display: grid;
+      grid-template-columns: 20px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 6px;
+    }
+
+    .menu-row.muted {
+      color: #656c77;
+    }
+
+    .menu-row.danger {
+      color: #a52824;
+      font-weight: 700;
+    }
+
+    .menu-row .record-dot {
+      width: 10px;
+      height: 10px;
+      margin-left: 3px;
+      border-radius: 50%;
+      background: #f84b43;
+      box-shadow: 0 0 0 4px rgba(248, 75, 67, 0.15);
+    }
+
+    .menu-row .hourglass {
+      color: #0f766e;
+      font-size: 15px;
+      text-align: center;
+    }
+
+    .menu-row .arrow {
+      color: #777e89;
+      font-size: 16px;
+    }
+
+    .menu-row .shortcut {
+      color: #818793;
+      font-size: 12px;
+    }
+
+    .menu-separator {
+      height: 1px;
+      margin: 6px 10px;
+      background: #d7dae0;
+    }
+
+    .notification {
+      position: absolute;
+      right: 95px;
+      bottom: 56px;
+      z-index: 22;
+      width: 390px;
+      display: grid;
+      grid-template-columns: 48px minmax(0, 1fr);
+      gap: 14px;
+      padding: 16px;
+      background: rgba(247, 248, 250, 0.98);
+      border: 1px solid #9ca3ae;
+      border-radius: 10px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+    }
+
+    .notification img {
+      width: 48px;
+      height: 48px;
+      border-radius: 10px;
+    }
+
+    .notification strong,
+    .notification span {
+      display: block;
+    }
+
+    .notification strong {
+      margin-top: 1px;
+      font-size: 14px;
+    }
+
+    .notification span {
+      margin-top: 4px;
+      color: #626a76;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <main class="desktop" aria-label="MeetScribe product preview">
+    <div class="menu-bar">
+      <div class="menu-left">
+        <span class="apple">&#63743;</span>
+        <strong>Notes</strong>
+        <span>File</span>
+        <span>Edit</span>
+        <span>View</span>
+      </div>
+      <div class="menu-right">
+        <span>Thu 20 Aug</span>
+        <span>10:42</span>
+        <span class="status-wave" aria-label="MeetScribe recording">
+          <span></span><span></span><span></span><span></span><span></span>
+        </span>
+      </div>
+    </div>
+
+    <section class="workspace-label">
+      <img src="../site/assets/app-icon.png" alt="">
+      <h1>MeetScribe</h1>
+      <p>Local meeting capture, on-device transcription, and notes published to storage you control.</p>
+      <div class="privacy-state">Local note saved first</div>
+    </section>
+
+    <section class="window editor-window" aria-label="Generated Markdown note">
+      <div class="titlebar">
+        <div class="traffic-lights"><i></i><i></i><i></i></div>
+        <strong>2026-08-20-product-review.md</strong>
+        <span>Saved locally</span>
+      </div>
+      <div class="editor-body">
+        <aside class="sidebar">
+          <div class="sidebar-head">
+            <img src="../site/assets/app-icon.png" alt="">
+            <span>Recordings</span>
+          </div>
+          <p class="folder-label">August 2026</p>
+          <span class="file active">20 - Product review</span>
+          <span class="file">18 - Release planning</span>
+          <span class="file">14 - Design critique</span>
+          <p class="folder-label">July 2026</p>
+          <span class="file">31 - Contributor sync</span>
+          <span class="file">28 - Agent adapters</span>
+        </aside>
+        <article class="note">
+          <h2>Product review</h2>
+          <div class="metadata">
+            <span>20 August 2026</span>
+            <span>meeting</span>
+            <span>transcript</span>
+          </div>
+          <h3>Summary</h3>
+          <p>Release checks passed. Publish the notes to the project repository after the local artifacts are complete.</p>
+          <h3>Decisions</h3>
+          <ul>
+            <li>Keep transcription local by default.</li>
+            <li>Make agents and remote destinations explicit opt-ins.</li>
+            <li>Use the versioned manifest for retry and recovery state.</li>
+          </ul>
+          <h3>Transcript</h3>
+          <div class="transcript">
+            <div class="turn"><time>00:02</time><strong>Me</strong><span>Let's review the release plan.</span></div>
+            <div class="turn"><time>00:06</time><strong>Them</strong><span>The local build is green.</span></div>
+            <div class="turn"><time>00:11</time><strong>Me</strong><span>Great. We can publish the notes.</span></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <aside class="menu-popover" aria-label="MeetScribe menu bar controls">
+      <div class="menu-row danger">
+        <span class="record-dot"></span>
+        <span>Stop recording (00:12:48)</span>
+        <span></span>
+      </div>
+      <div class="menu-row muted">
+        <span class="hourglass">&#8987;</span>
+        <span>Transcribing 1 recording...</span>
+        <span></span>
+      </div>
+      <div class="menu-separator"></div>
+      <div class="menu-row">
+        <span></span>
+        <span>Recent recordings</span>
+        <span class="arrow">&#8250;</span>
+      </div>
+      <div class="menu-row">
+        <span></span>
+        <span>Search transcripts...</span>
+        <span></span>
+      </div>
+      <div class="menu-row">
+        <span></span>
+        <span>Open recordings folder</span>
+        <span></span>
+      </div>
+      <div class="menu-separator"></div>
+      <div class="menu-row">
+        <span></span>
+        <span>Setup assistant...</span>
+        <span></span>
+      </div>
+      <div class="menu-row">
+        <span></span>
+        <span>Settings...</span>
+        <span class="shortcut">&#8984;,</span>
+      </div>
+      <div class="menu-row">
+        <span></span>
+        <span>Quit MeetScribe</span>
+        <span class="shortcut">&#8984;Q</span>
+      </div>
+    </aside>
+
+    <aside class="notification" aria-label="Recording saved notification">
+      <img src="../site/assets/app-icon.png" alt="">
+      <div>
+        <strong>Recording saved</strong>
+        <span>Transcribing in background. The local audio is safe.</span>
+      </div>
+    </aside>
+  </main>
+</body>
+</html>

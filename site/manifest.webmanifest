@@ -1,0 +1,17 @@
+{
+  "name": "MeetScribe",
+  "short_name": "MeetScribe",
+  "description": "Open source, local-first meeting capture for macOS.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#171a22",
+  "icons": [
+    {
+      "src": "assets/app-icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
