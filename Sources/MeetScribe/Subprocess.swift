@@ -20,15 +20,17 @@ enum SubprocessError: Error, LocalizedError {
 private final class PipeBuffer: @unchecked Sendable {
     private var data = Data()
     private let lock = NSLock()
+    private let handle: FileHandle
+    private var finished = false
     let done = DispatchGroup()
 
     init(_ handle: FileHandle) {
+        self.handle = handle
         done.enter()
         handle.readabilityHandler = { [self] h in
             let chunk = h.availableData
             if chunk.isEmpty {
-                h.readabilityHandler = nil
-                done.leave()
+                finish()
             } else {
                 lock.lock(); data.append(chunk); lock.unlock()
             }
@@ -36,6 +38,19 @@ private final class PipeBuffer: @unchecked Sendable {
     }
 
     var contents: Data { lock.lock(); defer { lock.unlock() }; return data }
+
+    func finish() {
+        lock.lock()
+        guard !finished else {
+            lock.unlock()
+            return
+        }
+        finished = true
+        handle.readabilityHandler = nil
+        lock.unlock()
+        try? handle.close()
+        done.leave()
+    }
 }
 
 enum Subprocess {
@@ -107,8 +122,12 @@ enum Subprocess {
             }
             throw SubprocessError.timeout(timeout)
         }
-        outBuf.done.wait()
-        errBuf.done.wait()
+        // A child can exit after spawning a descendant that still owns stdout/stderr.
+        // Never wait forever for EOF: terminate the remaining process group, allow a
+        // short drain, then close the read handles ourselves.
+        signalProcessTree(p, SIGTERM)
+        if outBuf.done.wait(timeout: .now() + 1) == .timedOut { outBuf.finish() }
+        if errBuf.done.wait(timeout: .now() + 1) == .timedOut { errBuf.finish() }
         guard p.terminationStatus == 0 else {
             throw SubprocessError.nonZeroExit(p.terminationStatus,
                 stderr: String(data: errBuf.contents, encoding: .utf8) ?? "")

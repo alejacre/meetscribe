@@ -45,4 +45,15 @@ final class SubprocessTests: XCTestCase {
         let out = try Subprocess.run("/bin/cat", [], stdin: "piped input")
         XCTAssertEqual(out, "piped input")
     }
+
+    func testParentExitDoesNotWaitForDescendantHoldingPipe() throws {
+        let started = Date()
+        let out = try Subprocess.run(
+            "/bin/sh",
+            ["-c", "(sleep 5) & echo done"],
+            timeout: 10)
+
+        XCTAssertEqual(out.trimmingCharacters(in: .whitespacesAndNewlines), "done")
+        XCTAssertLessThan(Date().timeIntervalSince(started), 3)
+    }
 }

@@ -11,10 +11,11 @@ extension Subprocess {
     /// wizard window) terminates the child: SIGTERM, then SIGKILL after 5s.
     static func stream(_ executable: String, _ args: [String],
                        timeout: TimeInterval = 3600,
-                       terminationGracePeriod: TimeInterval = 5) -> AsyncThrowingStream<String, Error> {
+                       terminationGracePeriod: TimeInterval = 5,
+                       environment: [String: String]? = nil) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             _ = ignoreSigpipe
-            let p = makeProcess(executable, args)
+            let p = makeProcess(executable, args, environment: environment)
             let pipe = Pipe()
             p.standardOutput = pipe
             p.standardError = pipe
@@ -33,20 +34,20 @@ extension Subprocess {
             }
 
             p.terminationHandler = { proc in
-                handle.readabilityHandler = nil
-                let finalData = handle.readDataToEndOfFile()
-                if !finalData.isEmpty {
-                    let text = String(decoding: finalData, as: UTF8.self)
-                    tail.append(text)
-                    continuation.yield(text)
-                }
-                if completion.timedOut {
-                    continuation.finish(throwing: SubprocessError.timeout(timeout))
-                } else if proc.terminationStatus == 0 {
-                    continuation.finish()
-                } else {
-                    continuation.finish(throwing: SubprocessError.nonZeroExit(
-                        proc.terminationStatus, stderr: tail.contents))
+                // Do not call readDataToEndOfFile here. A descendant may retain the
+                // write end after the direct child exits, which previously hung CI.
+                signalProcessTree(proc, SIGTERM)
+                DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) {
+                    handle.readabilityHandler = nil
+                    try? handle.close()
+                    if completion.timedOut {
+                        continuation.finish(throwing: SubprocessError.timeout(timeout))
+                    } else if proc.terminationStatus == 0 {
+                        continuation.finish()
+                    } else {
+                        continuation.finish(throwing: SubprocessError.nonZeroExit(
+                            proc.terminationStatus, stderr: tail.contents))
+                    }
                 }
             }
 

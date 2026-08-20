@@ -58,4 +58,20 @@ final class SubprocessStreamTests: XCTestCase {
         }
         XCTAssertLessThan(Date().timeIntervalSince(start), 2)
     }
+
+    func testParentExitDoesNotWaitForDescendantHoldingPipe() async throws {
+        let started = Date()
+        var output = ""
+
+        for try await chunk in Subprocess.stream(
+            "/bin/sh",
+            ["-c", "(sleep 5) & echo done"],
+            timeout: 10)
+        {
+            output += chunk
+        }
+
+        XCTAssertTrue(output.contains("done"))
+        XCTAssertLessThan(Date().timeIntervalSince(started), 3)
+    }
 }
