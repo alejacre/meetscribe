@@ -39,6 +39,10 @@ struct MeetScribeApp: App {
                 Text(state.transcribingCount == 1 ? "Transcribing 1 recording…"
                                                   : "Transcribing \(state.transcribingCount) recordings…")
             }
+            if state.publishingCount > 0 {
+                Text(state.publishingCount == 1 ? "Publishing 1 recording…"
+                                                : "Publishing \(state.publishingCount) recordings…")
+            }
             if let err = state.lastError {
                 Divider()
                 Text("Warning: \(err)").font(.caption)
@@ -67,6 +71,13 @@ struct MeetScribeApp: App {
                                     coordinator.retryTranscription(note: record.noteURL)
                                 }
                             }
+                            if record.hasTranscript,
+                               Settings().destinationConfiguration.hasEnabledDestination
+                            {
+                                Button(record.hasPublicationFailure ? "Retry failed exports" : "Publish again") {
+                                    coordinator.retryPublication(note: record.noteURL)
+                                }
+                            }
                             Button("Play audio") { NSWorkspace.shared.open(session.mixURL) }
                                 .disabled(!FileManager.default.fileExists(atPath: session.mixURL.path))
                             Button("Show in Finder") {
@@ -92,7 +103,7 @@ struct MeetScribeApp: App {
             }
             SettingsLink { Text("Settings…") }
             if state.isQuitting {
-                Text("Quitting  -  waiting for transcription…")
+                Text("Quitting  -  waiting for background work…")
             } else {
                 Button(quitLabel) {
                     // Don't lose an in-flight recording or transcription: stop,
@@ -115,7 +126,9 @@ struct MeetScribeApp: App {
     }
 
     private var quitLabel: String {
-        state.transcribingCount > 0 ? "Quit (will wait for transcription)" : "Quit MeetScribe"
+        state.transcribingCount > 0 || state.publishingCount > 0
+            ? "Quit (will wait for background work)"
+            : "Quit MeetScribe"
     }
 
     private func copySummary(_ rec: RecordingSession) {
@@ -135,13 +148,17 @@ struct MeetScribeApp: App {
         switch state.phase {
         case .recording: return "record.circle.fill"
         case .starting, .stopping: return "hourglass"
-        case .idle: return state.transcribingCount > 0 ? "hourglass" : "waveform"
+        case .idle:
+            return state.transcribingCount > 0 || state.publishingCount > 0 ? "hourglass" : "waveform"
         }
     }
 
     private var menuBarAccessibilityLabel: String {
         switch state.phase {
-        case .idle: state.transcribingCount > 0 ? "MeetScribe transcribing" : "MeetScribe idle"
+        case .idle:
+            if state.transcribingCount > 0 { "MeetScribe transcribing" }
+            else if state.publishingCount > 0 { "MeetScribe publishing" }
+            else { "MeetScribe idle" }
         case .starting: "MeetScribe starting recording"
         case .recording: "MeetScribe recording"
         case .stopping: "MeetScribe stopping recording"

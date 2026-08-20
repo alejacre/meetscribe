@@ -4,14 +4,18 @@ struct RecordingRecord: Identifiable, Equatable, Sendable {
     let noteURL: URL
     let assetDir: URL
     let modifiedAt: Date
+    let manifest: RecordingManifest?
 
     var id: String { assetDir.standardizedFileURL.path }
     var basename: String { assetDir.lastPathComponent }
     var hasTranscript: Bool { FileManager.default.fileExists(atPath: noteURL.path) }
+    var hasPublicationFailure: Bool {
+        manifest?.destinations.contains { $0.phase == .failed } == true
+    }
 }
 
 enum RecordingLibrary {
-    static func recordings(root: URL, limit: Int = 5) -> [RecordingRecord] {
+    static func recordings(root: URL, limit: Int? = 5) -> [RecordingRecord] {
         let fm = FileManager.default
         let assetsRoot = root.appendingPathComponent(".assets", isDirectory: true)
         let dirs = (try? fm.contentsOfDirectory(
@@ -26,14 +30,15 @@ enum RecordingLibrary {
             return RecordingRecord(
                 noteURL: note,
                 assetDir: dir,
-                modifiedAt: values?.contentModificationDate ?? .distantPast)
+                modifiedAt: values?.contentModificationDate ?? .distantPast,
+                manifest: RecordingManifestStore.loadIfPresent(
+                    from: dir.appendingPathComponent("manifest.json")))
         }
         .sorted {
             if $0.modifiedAt != $1.modifiedAt { return $0.modifiedAt > $1.modifiedAt }
             return $0.basename > $1.basename
         }
-        .prefix(limit)
-        .map { $0 }
+        .withLimit(limit)
     }
 }
 
@@ -65,5 +70,12 @@ enum RecordingFinalizer {
             throw error
         }
         return noteDestination
+    }
+}
+
+private extension Array {
+    func withLimit(_ limit: Int?) -> [Element] {
+        guard let limit else { return self }
+        return Array(prefix(limit))
     }
 }

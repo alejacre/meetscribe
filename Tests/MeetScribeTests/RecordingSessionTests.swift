@@ -111,4 +111,57 @@ final class RecordingSessionTests: XCTestCase {
         XCTAssertEqual(directoryMode.intValue & 0o777, 0o700)
         XCTAssertEqual(fileMode.intValue & 0o777, 0o600)
     }
+
+    func testCreateFolderPersistsPrivateManifest() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meetscribe-manifest-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let id = UUID()
+        let start = date(2026, 8, 20, 10, 30)
+        let session = RecordingSession(
+            root: root,
+            start: start,
+            appName: "teams",
+            bundleID: "com.microsoft.teams2",
+            trigger: .meetingAutomatic,
+            id: id)
+
+        try session.createFolder()
+
+        let manifest = try RecordingManifestStore.load(from: session.manifestURL)
+        let mode = try XCTUnwrap(
+            FileManager.default.attributesOfItem(atPath: session.manifestURL.path)[.posixPermissions]
+                as? NSNumber)
+        XCTAssertEqual(manifest.schemaVersion, RecordingManifest.currentSchemaVersion)
+        XCTAssertEqual(manifest.id, id)
+        XCTAssertEqual(manifest.startedAt, start)
+        XCTAssertEqual(manifest.source.appName, "teams")
+        XCTAssertEqual(manifest.source.bundleID, "com.microsoft.teams2")
+        XCTAssertEqual(manifest.source.trigger, .meetingAutomatic)
+        XCTAssertEqual(manifest.lifecycle, .recording)
+        XCTAssertEqual(mode.intValue & 0o777, 0o600)
+    }
+
+    func testRejectsUnsupportedManifestSchema() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meetscribe-manifest-version-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = RecordingSession(root: root, start: Date(), appName: nil)
+        try session.createFolder()
+        var json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: session.manifestURL))
+                as? [String: Any])
+        json["schemaVersion"] = RecordingManifest.currentSchemaVersion + 1
+        try JSONSerialization.data(withJSONObject: json).write(
+            to: session.manifestURL,
+            options: .atomic)
+
+        XCTAssertThrowsError(try RecordingManifestStore.load(from: session.manifestURL)) { error in
+            guard case RecordingManifestError.unsupportedSchemaVersion(
+                RecordingManifest.currentSchemaVersion + 1
+            ) = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
+    }
 }

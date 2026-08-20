@@ -44,7 +44,8 @@ final class TranscriptFormatterTests: XCTestCase {
         XCTAssertTrue(md.contains("attendees: []"))
         XCTAssertTrue(md.contains("## Transcript"))
         // Recording provenance lives in the trailing meta comment, not the frontmatter.
-        XCTAssertTrue(md.contains("<!-- meetscribe: app=zoom, duration=45:02, model=turbo, cleaned=false -->"))
+        XCTAssertTrue(md.contains(
+            "<!-- meetscribe: app=zoom, duration=45:02, model=turbo, cleaned=false, processor=none -->"))
     }
 
     func testEchoSuppressionDropsMicDuplicatesOfSystem() {
@@ -84,7 +85,7 @@ final class TranscriptFormatterTests: XCTestCase {
         let md = TranscriptFormatter.format(mic: [], system: [],
                                             header: .init(date: "d", app: "a", duration: "x", model: "m", cleanedByClaude: false))
         let patched = TranscriptFormatter.markCleaned(md)
-        XCTAssertTrue(patched.contains("cleaned=true -->"))
+        XCTAssertTrue(patched.contains("cleaned=true, processor=claude-code -->"))
         XCTAssertFalse(patched.contains("cleaned=false"))
     }
 

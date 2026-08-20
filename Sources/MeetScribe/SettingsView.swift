@@ -1,12 +1,27 @@
-import SwiftUI
 import ServiceManagement
+import SwiftUI
 
 struct SettingsView: View {
+    var body: some View {
+        TabView {
+            GeneralSettingsPane()
+                .tabItem { Label("General", systemImage: "gearshape") }
+            TriggerSettingsPane()
+                .tabItem { Label("Triggers", systemImage: "record.circle") }
+            AgentSettingsPane()
+                .tabItem { Label("Agent", systemImage: "wand.and.stars") }
+            DestinationSettingsPane()
+                .tabItem { Label("Destinations", systemImage: "externaldrive.connected.to.line.below") }
+        }
+        .frame(width: 640, height: 520)
+    }
+}
+
+private struct GeneralSettingsPane: View {
     @State private var settings = Settings()
     @State private var outputPath = ""
     @State private var model = ""
     @State private var whisperPath = ""
-    @State private var cleanup = false
     @State private var hotKeyOn = true
     @State private var launchAtLogin = false
     @State private var configurationError: String?
@@ -20,24 +35,18 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                        Button("Choose…") {
-                            let p = NSOpenPanel()
-                            p.canChooseDirectories = true
-                            p.canChooseFiles = false
-                            p.directoryURL = URL(fileURLWithPath: outputPath)
-                            if p.runModal() == .OK, let url = p.url {
-                                outputPath = url.path
-                                settings.outputFolder = url
-                            }
-                        }
+                        Button("Choose…", action: chooseOutputFolder)
                     }
                 }
+                Text("Recordings are always staged locally before optional Git or SFTP publishing.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Transcription") {
                 Picker("Whisper model", selection: $model) {
-                    ForEach(WhisperModels.all) { m in
-                        Text(m.displayName).tag(m.id)
+                    ForEach(WhisperModels.all) { item in
+                        Text(item.displayName).tag(item.id)
                     }
                     if WhisperModels.model(id: model) == nil {
                         Text(model).tag(model)
@@ -60,36 +69,26 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                        Button("Choose…") {
-                            let p = NSOpenPanel()
-                            p.canChooseFiles = true
-                            p.canChooseDirectories = false
-                            p.showsHiddenFiles = true
-                            if p.runModal() == .OK, let url = p.url {
-                                whisperPath = url.path
-                                settings.mlxWhisperPath = url.path
-                            }
-                        }
+                        Button("Choose…", action: chooseWhisper)
                     }
                 }
-
-                Toggle("Send transcripts to Claude for cleanup", isOn: $cleanup)
-                    .onChange(of: cleanup) { _, v in settings.claudeCleanupEnabled = v }
-                Text("Sends the full transcript to your configured Claude service. Tools and session persistence are disabled.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
-            Section("General") {
-                Toggle("Global shortcut \(HotKey.comboDescription) to start/stop recording", isOn: $hotKeyOn)
-                    .onChange(of: hotKeyOn) { _, v in
-                        settings.hotKeyEnabled = v
-                        NotificationCenter.default.post(name: RecordingCoordinator.hotKeySettingChanged, object: nil)
-                    }
+            Section("Application") {
+                Toggle(
+                    "Global shortcut \(HotKey.comboDescription) to start/stop recording",
+                    isOn: $hotKeyOn
+                )
+                .onChange(of: hotKeyOn) { _, value in
+                    settings.hotKeyEnabled = value
+                    NotificationCenter.default.post(
+                        name: RecordingCoordinator.hotKeySettingChanged,
+                        object: nil)
+                }
                 Toggle("Start MeetScribe at login", isOn: $launchAtLogin)
-                    .onChange(of: launchAtLogin) { _, v in
+                    .onChange(of: launchAtLogin) { _, value in
                         do {
-                            if v { try SMAppService.mainApp.register() }
+                            if value { try SMAppService.mainApp.register() }
                             else { try SMAppService.mainApp.unregister() }
                         } catch {
                             launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -104,23 +103,37 @@ struct SettingsView: View {
                         .foregroundStyle(.orange)
                 }
             }
-
-            Section("Meetings") {
-                Text("MeetScribe watches for Zoom, Slack, Chime, Teams, FaceTime and WebEx using the microphone, offers to record when a meeting starts, and stops automatically when it ends.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
         }
         .formStyle(.grouped)
-        .frame(width: 480)
-        .fixedSize(horizontal: false, vertical: true)
+        .padding()
         .onAppear {
             outputPath = settings.outputFolder.path
             model = settings.whisperModel
             whisperPath = settings.mlxWhisperPath
-            cleanup = settings.claudeCleanupEnabled
             hotKeyOn = settings.hotKeyEnabled
             launchAtLogin = SMAppService.mainApp.status == .enabled
+        }
+    }
+
+    private func chooseOutputFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.directoryURL = URL(fileURLWithPath: outputPath)
+        if panel.runModal() == .OK, let url = panel.url {
+            outputPath = url.path
+            settings.outputFolder = url
+        }
+    }
+
+    private func chooseWhisper() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.showsHiddenFiles = true
+        if panel.runModal() == .OK, let url = panel.url {
+            whisperPath = url.path
+            settings.mlxWhisperPath = url.path
         }
     }
 

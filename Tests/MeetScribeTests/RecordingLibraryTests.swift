@@ -40,6 +40,27 @@ final class RecordingLibraryTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: session.assetDir.path))
     }
 
+    func testFinalizedSessionRetainsManifestIdentityAndSource() throws {
+        let id = UUID()
+        let session = RecordingSession(
+            root: root,
+            start: date(2026, 7, 28),
+            appName: "zoom",
+            bundleID: "us.zoom.xos",
+            trigger: .meetingPrompt,
+            id: id)
+        try session.createFolder()
+        try Data("note".utf8).write(to: session.noteURL)
+
+        let finalNote = try RecordingFinalizer.move(session, toTopicSlug: "planning")
+        let restored = RecordingSession(existingNote: finalNote)
+
+        XCTAssertEqual(restored.id, id)
+        XCTAssertEqual(restored.appName, "zoom")
+        XCTAssertEqual(restored.sourceBundleID, "us.zoom.xos")
+        XCTAssertEqual(restored.trigger, .meetingPrompt)
+    }
+
     func testFinalizerRollsAssetsBackWhenNoteMoveFails() throws {
         let session = RecordingSession(root: root, start: date(2026, 7, 28), appName: "zoom")
         try session.createFolder()

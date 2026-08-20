@@ -5,29 +5,27 @@ import os
 
 private let logger = Logger(subsystem: "dev.alejacre.meetscribe", category: "detector")
 
-struct DetectedMeeting: Equatable {
+struct DetectedMeeting: Equatable, Hashable, Sendable {
     let bundleID: String
     let appName: String
 }
 
 @MainActor
 final class MeetingDetector {
-    static let knownApps: [String: String] = [
-        "us.zoom.xos": "zoom",
-        "com.tinyspeck.slackmacgap": "slack",
-        "com.amazon.Amazon-Chime": "chime",
-        "com.microsoft.teams2": "teams",
-        "com.microsoft.teams": "teams",
-        "com.apple.FaceTime": "facetime",
-        "com.cisco.webexmeetingsapp": "webex",
-        "Cisco-Systems.Spark": "webex",
-    ]
+    static var knownApps: [String: String] {
+        Dictionary(uniqueKeysWithValues: MeetingApps.defaults.map { ($0.bundleID, $0.appName) })
+    }
 
     var onMeetingStart: ((DetectedMeeting) -> Void)?
     var onMeetingEnd: ((DetectedMeeting) -> Void)?
 
     private var timer: Timer?
-    private var current: DetectedMeeting?
+    private var current: Set<DetectedMeeting> = []
+    private let appDefinitions: () -> [String: String]
+
+    init(appDefinitions: @escaping () -> [String: String] = { MeetingDetector.knownApps }) {
+        self.appDefinitions = appDefinitions
+    }
 
     func startPolling(interval: TimeInterval = 1.5) {
         let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
@@ -41,19 +39,36 @@ final class MeetingDetector {
         // Zoom holds the microphone after the meeting ends; its CptHost helper
         // only runs during an actual meeting, so treat idle Zoom as no-meeting
         // instead of letting it mask Teams/Chime also on the mic.
-        let meeting = Self.appsUsingMicrophone().first {
+        let active = Set(Self.appsUsingMicrophone(knownApps: appDefinitions()).filter {
             $0.appName != "zoom" || Self.zoomMeetingHelperRunning()
+        })
+        let changes = Self.changes(previous: current, active: active)
+        if !changes.started.isEmpty || !changes.ended.isEmpty {
+            let activeNames = active.map(\.appName).sorted().joined(separator: ",")
+            let previousNames = current.map(\.appName).sorted().joined(separator: ",")
+            let activeLabel = activeNames.isEmpty ? "none" : activeNames
+            let previousLabel = previousNames.isEmpty ? "none" : previousNames
+            logger.info("meeting state: \(activeLabel, privacy: .public) (was \(previousLabel, privacy: .public))")
         }
-        if meeting != current {
-            logger.info("meeting state: \(meeting?.appName ?? "none", privacy: .public) (was \(self.current?.appName ?? "none", privacy: .public))")
+        current = active
+        for meeting in changes.ended.sorted(by: Self.orderMeetings) {
+            onMeetingEnd?(meeting)
         }
-        if let meeting, meeting != current {
-            current = meeting
+        for meeting in changes.started.sorted(by: Self.orderMeetings) {
             onMeetingStart?(meeting)
-        } else if meeting == nil, let ended = current {
-            current = nil
-            onMeetingEnd?(ended)
         }
+    }
+
+    nonisolated static func changes(
+        previous: Set<DetectedMeeting>,
+        active: Set<DetectedMeeting>
+    ) -> (started: Set<DetectedMeeting>, ended: Set<DetectedMeeting>) {
+        (active.subtracting(previous), previous.subtracting(active))
+    }
+
+    private nonisolated static func orderMeetings(_ lhs: DetectedMeeting, _ rhs: DetectedMeeting) -> Bool {
+        if lhs.appName != rhs.appName { return lhs.appName < rhs.appName }
+        return lhs.bundleID < rhs.bundleID
     }
 
     static func zoomMeetingHelperRunning() -> Bool {
@@ -62,7 +77,9 @@ final class MeetingDetector {
         }
     }
 
-    static func appsUsingMicrophone() -> [DetectedMeeting] {
+    static func appsUsingMicrophone(
+        knownApps: [String: String] = MeetingDetector.knownApps
+    ) -> [DetectedMeeting] {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyProcessObjectList,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -95,7 +112,10 @@ final class MeetingDetector {
 
             guard let app = NSRunningApplication(processIdentifier: pid),
                   let bundleID = app.bundleIdentifier,
-                  let name = knownApps[bundleID] else { continue }
+                  let name = knownApps[bundleID]
+            else {
+                continue
+            }
             result.append(DetectedMeeting(bundleID: bundleID, appName: name))
         }
         return result

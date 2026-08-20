@@ -100,7 +100,7 @@ enum TranscriptFormatter {
         }
 
         // Obsidian-style meeting note: YAML frontmatter matching the vault convention,
-        // then a raw "## Transcript" body. Claude cleanup later inserts "## Summary"
+        // then a raw "## Transcript" body. A transcript agent may insert "## Summary"
         // above the transcript. Recording metadata (model/duration/cleanup) lives in a
         // trailing HTML comment so it stays out of the rendered note and the graph.
         var out = """
@@ -123,16 +123,24 @@ enum TranscriptFormatter {
     /// Trailing provenance line: `<!-- meetscribe: app=…, duration=…, model=…, cleaned=… -->`.
     static func metaComment(_ header: TranscriptHeader) -> String {
         "<!-- meetscribe: app=\(header.app), duration=\(header.duration), "
-            + "model=\(header.model), cleaned=\(header.cleanedByClaude) -->"
+            + "model=\(header.model), cleaned=\(header.cleanedByClaude), "
+            + "processor=\(header.cleanedByClaude ? "claude-code" : "none") -->"
     }
 
-    /// Flips the trailing metadata comment's `cleaned` flag after Claude cleanup (the
-    /// prompt forbids Claude itself from editing frontmatter or the meta comment).
+    /// Records the processor after a validated cleanup pass. The prompt forbids the
+    /// processor itself from editing frontmatter or the metadata comment.
+    static func markProcessed(_ markdown: String, by processorID: String) -> String {
+        markdown.replacingOccurrences(
+            of: "cleaned=false, processor=none -->",
+            with: "cleaned=true, processor=\(RecordingSession.slug(processorID)) -->")
+    }
+
+    /// Backward-compatible helper for callers and older tests.
     static func markCleaned(_ markdown: String) -> String {
-        markdown.replacingOccurrences(of: "cleaned=false -->", with: "cleaned=true -->")
+        markProcessed(markdown, by: "claude-code")
     }
 
-    /// Extracts the body of the "## Summary" section (added by Claude cleanup),
+    /// Extracts the body of the optional "## Summary" section,
     /// or nil if the transcript has none.
     static func extractSummary(_ markdown: String) -> String? {
         guard let range = markdown.range(of: "## Summary") else { return nil }

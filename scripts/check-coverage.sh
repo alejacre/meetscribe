@@ -2,8 +2,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-MINIMUM="${MINIMUM_COVERAGE:-25}"
-swift test --enable-code-coverage
+MINIMUM="${MINIMUM_COVERAGE:-29}"
+scripts/run-tests.sh --coverage
 
 TEST_BINARY="$(find .build -path '*debug/MeetScribePackageTests.xctest/Contents/MacOS/MeetScribePackageTests' -type f | head -1)"
 PROFILE="$(find .build -name default.profdata -type f | head -1)"

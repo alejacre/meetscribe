@@ -5,16 +5,17 @@ import AppKit
 final class RecordingCoordinator: ObservableObject {
     let state: AppState
     let notifier = Notifier()
-    let detector = MeetingDetector()
+    let detector: MeetingDetector
     private var recorder: (any AudioRecording)?
     private var session: RecordingSession?
-    private var detectedMeeting: DetectedMeeting?
+    private var detectedMeetings: [String: DetectedMeeting] = [:]
     private var settings = Settings()
     private var elapsedTimer: Timer?
     private var sleepActivity: NSObjectProtocol?
     private var hotKey: HotKey?
     private var stopRequestedDuringStart = false
     private var activeTranscriptions: Set<String> = []
+    private var activePublications: Set<String> = []
     private let recorderFactory: () -> any AudioRecording
     private let mixer: (RecordingSession) async throws -> Void
 
@@ -29,6 +30,11 @@ final class RecordingCoordinator: ObservableObject {
         self.state = state
         self.recorderFactory = recorderFactory
         self.mixer = mixer
+        detector = MeetingDetector(appDefinitions: {
+            Dictionary(uniqueKeysWithValues: Settings().meetingRules.map {
+                ($0.bundleID, $0.appName)
+            })
+        })
         notifier.isEnabled = enableSystemIntegrations
         if enableSystemIntegrations { notifier.configure() }
         // First-run users grant notifications in the wizard; only ask here once setup
@@ -36,23 +42,51 @@ final class RecordingCoordinator: ObservableObject {
         if enableSystemIntegrations, settings.setupCompleted {
             Task { await Permissions.requestNotifications() }
         }
-        notifier.onRecordAction = { [weak self] in Task { await self?.startRecording() } }
+        notifier.onRecordAction = { [weak self] bundleID in
+            Task { @MainActor in
+                guard let self,
+                      let bundleID,
+                      let meeting = self.detectedMeetings[bundleID]
+                else {
+                    return
+                }
+                await self.startRecording(trigger: .meetingPrompt, meeting: meeting)
+            }
+        }
         notifier.onRetryAction = { [weak self] note in
             Task { @MainActor in self?.transcribeInBackground(session: RecordingSession(existingNote: note)) }
         }
         detector.onMeetingStart = { [weak self] meeting in
             Task { @MainActor in
-                guard let self, case .idle = self.state.phase else { return }
-                self.detectedMeeting = meeting
-                self.notifier.notify(title: "Meeting detected: \(meeting.appName)",
-                                     body: "Want to record it?", category: "MEETING_START")
+                guard let self else { return }
+                self.detectedMeetings[meeting.bundleID] = meeting
+                guard case .idle = self.state.phase else { return }
+                let policy = self.settings.meetingRules
+                    .first { $0.bundleID == meeting.bundleID }?.policy ?? .ignore
+                guard policy != .ignore else { return }
+                switch policy {
+                case .ignore:
+                    break
+                case .ask:
+                    self.notifier.notify(
+                        title: "Meeting detected: \(meeting.appName)",
+                        body: "Want to record it?",
+                        category: "MEETING_START",
+                        userInfo: ["meetingBundleID": meeting.bundleID])
+                case .automatic:
+                    self.notifier.notify(
+                        title: "Meeting detected: \(meeting.appName)",
+                        body: "Starting automatic recording.",
+                        category: "INFO")
+                    await self.startRecording(trigger: .meetingAutomatic, meeting: meeting)
+                }
             }
         }
         detector.onMeetingEnd = { [weak self] meeting in
             Task { @MainActor in
                 guard let self else { return }
-                if self.detectedMeeting == meeting { self.detectedMeeting = nil }
-                guard self.session?.appName == meeting.appName,
+                self.detectedMeetings.removeValue(forKey: meeting.bundleID)
+                guard self.session?.sourceBundleID == meeting.bundleID,
                       self.state.phase == .starting || self.state.phase == .recording
                 else { return }
                 self.notifier.notify(title: "Meeting ended",
@@ -67,7 +101,7 @@ final class RecordingCoordinator: ObservableObject {
                 Task { @MainActor in
                     guard let self else { return }
                     switch self.state.phase {
-                    case .idle: await self.startRecording()
+                    case .idle: await self.startRecording(trigger: .hotKey)
                     case .starting, .recording: await self.stopRecording()
                     case .stopping: break
                     }
@@ -80,6 +114,9 @@ final class RecordingCoordinator: ObservableObject {
             }
         }
         refreshRecent()
+        if enableSystemIntegrations {
+            resumePendingPublications()
+        }
     }
 
     private func applyHotKeySetting() {
@@ -91,12 +128,19 @@ final class RecordingCoordinator: ObservableObject {
         }
     }
 
-    func startRecording() async {
+    func startRecording(
+        trigger: RecordingTriggerKind = .manual,
+        meeting: DetectedMeeting? = nil
+    ) async {
         guard case .idle = state.phase else { return }
         state.phase = .starting
         stopRequestedDuringStart = false
-        let meeting = detectedMeeting
-        let s = RecordingSession(root: settings.outputFolder, start: Date(), appName: meeting?.appName)
+        let s = RecordingSession(
+            root: settings.outputFolder,
+            start: Date(),
+            appName: meeting?.appName,
+            bundleID: meeting?.bundleID,
+            trigger: trigger)
         let r = recorderFactory()
         recorder = r
         session = s
@@ -170,14 +214,22 @@ final class RecordingCoordinator: ObservableObject {
             try await r.stop()
             if let warning = r.sourceWarning { state.lastError = warning }
             try await mixer(s)
+            try? RecordingManifestStore.update(at: s.manifestURL) { manifest in
+                manifest.endedAt = Date()
+                manifest.lifecycle = .recorded
+            }
             notifier.notify(title: "Recording saved",
                             body: "Transcribing in background…",
-                            category: "INFO", userInfo: ["recording": s.basename])
+                            category: "INFO", userInfo: ["notePath": s.noteURL.path])
             transcribeInBackground(session: s)
         } catch {
+            try? RecordingManifestStore.update(at: s.manifestURL) { manifest in
+                manifest.endedAt = Date()
+                manifest.lifecycle = .failed
+            }
             state.lastError = error.localizedDescription
             notifier.notify(title: "Recording failed", body: "Audio may be recoverable in Recent recordings.",
-                            category: "TRANSCRIBE_FAILED", userInfo: ["recording": s.basename])
+                            category: "TRANSCRIBE_FAILED", userInfo: ["notePath": s.noteURL.path])
         }
         recorder = nil
         session = nil
@@ -186,7 +238,7 @@ final class RecordingCoordinator: ObservableObject {
         refreshRecent()
     }
 
-    /// Runs whisper + claude cleanup off the main actor; the app stays usable
+    /// Runs Whisper and optional transcript processing off the main actor; the app stays usable
     /// (and can record again) while transcription runs.
     func transcribeInBackground(session s: RecordingSession) {
         let key = s.assetDir.standardizedFileURL.path
@@ -194,10 +246,15 @@ final class RecordingCoordinator: ObservableObject {
         state.transcribingCount = activeTranscriptions.count
         let whisperPath = settings.mlxWhisperPath
         let whisperModel = settings.whisperModel
-        let cleanupEnabled = settings.claudeCleanupEnabled
+        let agentConfiguration = settings.agentConfiguration
+        let destinationConfiguration = settings.destinationConfiguration
         let notifier = self.notifier
         Task.detached(priority: .utility) { [weak self] in
             do {
+                try s.ensureManifest()
+                try RecordingManifestStore.update(at: s.manifestURL) { manifest in
+                    manifest.lifecycle = .transcribing
+                }
                 let t = Transcriber(mlxWhisperPath: whisperPath, model: whisperModel)
                 let tracks = try t.transcribe(mic: s.micURL, system: s.systemURL)
                 let (rawMic, sys) = (tracks.mic, tracks.system)
@@ -211,8 +268,8 @@ final class RecordingCoordinator: ObservableObject {
                 let mic = TranscriptFormatter.suppressEcho(mic: rawMic, system: sys)
 
                 let dur = max(mic.last?.end ?? 0, sys.last?.end ?? 0)
-                // Provisional app label: the appName, or (on retry, where appName is nil)
-                // the slug portion of the note basename after the `yyyy-MM-dd-` prefix.
+                // Legacy recordings may not have a manifest, so retain the basename
+                // fallback while new recordings use their persisted source metadata.
                 let appLabel = s.appName ?? String(s.basename.dropFirst(s.datePart.count + 1))
                 var md = TranscriptFormatter.format(mic: mic, system: sys, header: .init(
                     date: RecordingSession.headerDateFormatter.string(from: s.start),
@@ -223,11 +280,13 @@ final class RecordingCoordinator: ObservableObject {
                 try s.secureFile(s.transcriptMD)
 
                 var finalNote = s.noteURL
-                var cleanupWarning: String?
-                if cleanupEnabled {
+                var processingWarning: String?
+                var processorID: String?
+                if let processor = TranscriptProcessorFactory.make(configuration: agentConfiguration) {
                     do {
-                        if let result = try ClaudeCleaner.clean(md) {
-                            md = TranscriptFormatter.markCleaned(result.markdown)
+                        if let result = try processor.process(md) {
+                            processorID = processor.id
+                            md = TranscriptFormatter.markProcessed(result.markdown, by: processor.id)
                             try md.write(to: s.transcriptMD, atomically: true, encoding: .utf8)
                             try s.secureFile(s.transcriptMD)
                             if let slug = result.topicSlug {
@@ -235,31 +294,54 @@ final class RecordingCoordinator: ObservableObject {
                             }
                         }
                     } catch {
-                        cleanupWarning = error.localizedDescription
+                        processingWarning = error.localizedDescription
                     }
                 }
-                if let cleanupWarning {
-                    notifier.notify(title: "Claude cleanup skipped",
-                                    body: cleanupWarning, category: "INFO",
-                                    userInfo: ["recording":
-                                        finalNote.deletingPathExtension().lastPathComponent])
-                    await MainActor.run { [weak self] in self?.state.lastError = cleanupWarning }
+                let finalSession = RecordingSession(existingNote: finalNote, start: s.start)
+                try RecordingManifestStore.update(at: finalSession.manifestURL) { manifest in
+                    manifest.lifecycle = .ready
+                    manifest.transcript = TranscriptRunMetadata(
+                        completedAt: Date(),
+                        model: whisperModel,
+                        processorID: processorID)
                 }
-                notifier.notify(title: "Transcript ready",
-                                body: "Your transcript is ready.", category: "INFO",
-                                userInfo: ["recording":
-                                    finalNote.deletingPathExtension().lastPathComponent])
-                if cleanupEnabled, cleanupWarning == nil, finalNote != s.noteURL {
-                    notifier.notify(title: "Transcript cleaned by Claude",
-                                    body: "Cleanup completed.", category: "INFO",
-                                    userInfo: ["recording":
-                                        finalNote.deletingPathExtension().lastPathComponent])
+                if let processingWarning {
+                    notifier.notify(
+                        title: "Transcript agent skipped",
+                        body: processingWarning,
+                        category: "INFO",
+                        userInfo: ["notePath": finalNote.path])
+                    await MainActor.run { [weak self] in self?.state.lastError = processingWarning }
+                } else {
+                    await MainActor.run { [weak self] in self?.clearTranscriptionFailure() }
+                }
+                notifier.notify(
+                    title: "Transcript ready",
+                    body: "Your transcript is ready.",
+                    category: "INFO",
+                    userInfo: ["notePath": finalNote.path])
+                if let processorID, processingWarning == nil {
+                    notifier.notify(
+                        title: "Transcript processed",
+                        body: "Completed with \(processorID).",
+                        category: "INFO",
+                        userInfo: ["notePath": finalNote.path])
+                }
+                if destinationConfiguration.hasEnabledDestination {
+                    await MainActor.run { [weak self] in
+                        self?.publishInBackground(
+                            session: finalSession,
+                            configuration: destinationConfiguration)
+                    }
                 }
             } catch {
+                try? RecordingManifestStore.update(at: s.manifestURL) { manifest in
+                    manifest.lifecycle = .failed
+                }
                 notifier.notify(title: "Transcription failed",
                                 body: "Audio is safe. Retry from Recent recordings.",
                                 category: "TRANSCRIBE_FAILED",
-                                userInfo: ["recording": s.basename])
+                                userInfo: ["notePath": s.noteURL.path])
                 await MainActor.run { [weak self] in
                     self?.state.lastError = "Transcription failed: \(error.localizedDescription)"
                 }
@@ -268,6 +350,62 @@ final class RecordingCoordinator: ObservableObject {
                 self?.activeTranscriptions.remove(key)
                 self?.state.transcribingCount = self?.activeTranscriptions.count ?? 0
                 self?.refreshRecent()
+            }
+        }
+    }
+
+    func publishInBackground(
+        session s: RecordingSession,
+        configuration: DestinationConfiguration? = nil
+    ) {
+        let selectedConfiguration = configuration ?? settings.destinationConfiguration
+        guard selectedConfiguration.hasEnabledDestination else { return }
+        let key = s.assetDir.standardizedFileURL.path
+        guard activePublications.insert(key).inserted else { return }
+        state.publishingCount = activePublications.count
+        let notifier = self.notifier
+        Task.detached(priority: .utility) { [weak self] in
+            let results = PublicationService.publish(
+                session: s,
+                configuration: selectedConfiguration)
+            let failures = results.compactMap { result in
+                result.errorDescription.map { "\(result.destinationID): \($0)" }
+            }
+            if failures.isEmpty {
+                notifier.notify(
+                    title: "Recording published",
+                    body: "Configured destinations are up to date.",
+                    category: "INFO",
+                    userInfo: ["notePath": s.noteURL.path])
+            } else {
+                let warning = "Publishing failed: \(failures.joined(separator: "; "))"
+                notifier.notify(
+                    title: "Publishing failed",
+                    body: "The local recording is safe. Retry from Recent recordings.",
+                    category: "INFO",
+                    userInfo: ["notePath": s.noteURL.path])
+                await MainActor.run { [weak self] in self?.state.lastError = warning }
+            }
+            await MainActor.run { [weak self] in
+                self?.activePublications.remove(key)
+                self?.state.publishingCount = self?.activePublications.count ?? 0
+                self?.refreshRecent()
+            }
+        }
+    }
+
+    func retryPublication(note: URL) {
+        publishInBackground(session: RecordingSession(existingNote: note))
+    }
+
+    private func resumePendingPublications() {
+        let configuration = settings.destinationConfiguration
+        guard configuration.hasEnabledDestination else { return }
+        for recording in RecordingLibrary.recordings(root: settings.outputFolder, limit: nil)
+        where recording.hasTranscript {
+            let session = RecordingSession(existingNote: recording.noteURL)
+            if PublicationService.needsResume(session: session, configuration: configuration) {
+                publishInBackground(session: session, configuration: configuration)
             }
         }
     }
@@ -281,7 +419,7 @@ final class RecordingCoordinator: ObservableObject {
             try? await Task.sleep(for: .milliseconds(100))
         }
         let deadline = Date().addingTimeInterval(300)
-        while state.transcribingCount > 0, Date() < deadline {
+        while state.transcribingCount > 0 || state.publishingCount > 0, Date() < deadline {
             try? await Task.sleep(for: .seconds(1))
         }
         NSApplication.shared.terminate(nil)
@@ -305,6 +443,11 @@ final class RecordingCoordinator: ObservableObject {
     func clearError() {
         state.lastError = nil
         state.showPermissionHelp = false
+    }
+
+    func clearTranscriptionFailure() {
+        guard state.lastError?.hasPrefix("Transcription failed:") == true else { return }
+        state.lastError = nil
     }
 
     func refreshRecent() {

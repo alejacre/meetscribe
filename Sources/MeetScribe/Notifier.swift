@@ -3,7 +3,7 @@ import AppKit
 import UserNotifications
 
 final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
-    var onRecordAction: (() -> Void)?
+    var onRecordAction: ((String?) -> Void)?
     var onRetryAction: ((URL) -> Void)?
     var isEnabled = true
 
@@ -49,7 +49,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
         switch response.actionIdentifier {
-        case "RECORD": onRecordAction?()
+        case "RECORD":
+            onRecordAction?(response.notification.request.content.userInfo["meetingBundleID"] as? String)
         case "RETRY":
             if let note = noteURL(from: response.notification.request.content.userInfo) {
                 onRetryAction?(note)
@@ -66,6 +67,15 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
     }
 
     private func noteURL(from userInfo: [AnyHashable: Any]) -> URL? {
+        if let path = userInfo["notePath"] as? String {
+            let note = URL(fileURLWithPath: path).standardizedFileURL
+            guard note.pathExtension == "md",
+                  note.lastPathComponent == URL(fileURLWithPath: note.lastPathComponent).lastPathComponent
+            else {
+                return nil
+            }
+            return note
+        }
         guard let basename = userInfo["recording"] as? String,
               basename == URL(fileURLWithPath: basename).lastPathComponent,
               !basename.contains("/")

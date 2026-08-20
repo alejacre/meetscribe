@@ -11,7 +11,7 @@ enum SetupStep: Int, CaseIterable {
         case .model: "Whisper model"
         case .permissions: "Permissions"
         case .output: "Where to save"
-        case .cleanup: "Claude cleanup"
+        case .cleanup: "Transcript agent"
         case .done: "All set"
         }
     }
@@ -56,6 +56,23 @@ final class SetupModel: ObservableObject {
 
     private var settings = Settings()
     private var workTask: Task<Void, Never>?
+
+    nonisolated static var managedToolRoot: URL {
+        URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("Library/Application Support/MeetScribe/uv-tools", isDirectory: true)
+    }
+
+    nonisolated static var managedBinRoot: URL {
+        URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("Library/Application Support/MeetScribe/bin", isDirectory: true)
+    }
+
+    nonisolated static var managedToolEnvironment: [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        environment["UV_TOOL_DIR"] = managedToolRoot.path
+        environment["UV_TOOL_BIN_DIR"] = managedBinRoot.path
+        return environment
+    }
 
     init() {
         let s = Settings()
@@ -102,13 +119,22 @@ final class SetupModel: ObservableObject {
 
     func checkEngine() async {
         enginePhase = .checking
-        let result = await Task.detached(priority: .utility) {
-            let path = ToolFinder.findTool("mlx_whisper")
+        let configuredPath = (settings.mlxWhisperPath as NSString).expandingTildeInPath
+        let result = await Task.detached(priority: .utility) { () -> String? in
             let uv = ToolFinder.findTool("uv")
-            let list = uv.flatMap { try? Subprocess.run($0, ["tool", "list"], timeout: 30) }
-            return (path, list)
+            if FileManager.default.isExecutableFile(atPath: configuredPath) {
+                return configuredPath
+            }
+            let managedPath = Self.managedBinRoot.appendingPathComponent("mlx_whisper").path
+            if FileManager.default.isExecutableFile(atPath: managedPath) {
+                return managedPath
+            }
+            guard let path = ToolFinder.findTool("mlx_whisper") else { return nil }
+            guard let uv else { return path }
+            let list = try? Subprocess.run(uv, ["tool", "list"], timeout: 30)
+            return Self.isPinnedEngineList(list ?? "") ? path : nil
         }.value
-        if let path = result.0, Self.isPinnedEngineList(result.1 ?? "") {
+        if let path = result {
             resolvedEnginePath = path
             settings.mlxWhisperPath = path
             enginePhase = .done
@@ -135,12 +161,21 @@ final class SetupModel: ObservableObject {
                 guard let uvPath = uv, FileManager.default.isExecutableFile(atPath: uvPath) else {
                     self.enginePhase = .failed("Could not install uv."); return
                 }
+                try FileManager.default.createDirectory(
+                    at: Self.managedToolRoot,
+                    withIntermediateDirectories: true)
+                try FileManager.default.createDirectory(
+                    at: Self.managedBinRoot,
+                    withIntermediateDirectories: true)
                 try await self.runLogged(
                     uvPath,
                     ["tool", "install", "--force",
                      "mlx-whisper==\(WhisperModels.mlxWhisperVersion)"],
-                    into: \.engineLog)
+                    into: \.engineLog,
+                    environment: Self.managedToolEnvironment)
                 if Task.isCancelled { return }
+                self.settings.mlxWhisperPath = Self.managedBinRoot
+                    .appendingPathComponent("mlx_whisper").path
                 await self.checkEngine()
                 if case .done = self.enginePhase {} else {
                     self.enginePhase = .failed("mlx_whisper not found after install.")
@@ -271,8 +306,9 @@ final class SetupModel: ObservableObject {
     /// carriage-return handling) and optionally parsing a percentage into a keypath.
     private func runLogged(_ bin: String, _ args: [String],
                            into log: ReferenceWritableKeyPath<SetupModel, String>,
-                           progress: ReferenceWritableKeyPath<SetupModel, Int?>? = nil) async throws {
-        for try await chunk in Subprocess.stream(bin, args) {
+                           progress: ReferenceWritableKeyPath<SetupModel, Int?>? = nil,
+                           environment: [String: String]? = nil) async throws {
+        for try await chunk in Subprocess.stream(bin, args, environment: environment) {
             if Task.isCancelled { throw CancellationError() }
             self[keyPath: log] = Self.appendLog(self[keyPath: log], chunk: chunk)
             if let progress, let pct = Self.progressPercent(in: chunk) {

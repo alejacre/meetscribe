@@ -8,6 +8,9 @@ struct RecordingSession: Sendable {
     let noteURL: URL
     let start: Date
     let appName: String?
+    let sourceBundleID: String?
+    let trigger: RecordingTriggerKind
+    let id: UUID
 
     static let stampFormatter: DateFormatter = {
         let fmt = DateFormatter()
@@ -32,9 +35,19 @@ struct RecordingSession: Sendable {
             .filter { $0.isLetter || $0.isNumber || $0 == "-" }
     }
 
-    init(root: URL, start: Date, appName: String?) {
+    init(
+        root: URL,
+        start: Date,
+        appName: String?,
+        bundleID: String? = nil,
+        trigger: RecordingTriggerKind = .manual,
+        id: UUID = UUID()
+    ) {
         self.start = start
         self.appName = appName
+        sourceBundleID = bundleID
+        self.trigger = trigger
+        self.id = id
         let stamp = Self.stampFormatter.string(from: start)
         let base = "\(stamp)-\(Self.slug(appName ?? "manual"))"
         // Date-only names collide when two meetings happen the same day (or a curated
@@ -60,8 +73,14 @@ struct RecordingSession: Sendable {
     init(existingNote: URL, start: Date? = nil) {
         self.noteURL = existingNote
         let datePart = String(existingNote.deletingPathExtension().lastPathComponent.prefix(10))
-        self.start = start ?? Self.headerDateFormatter.date(from: datePart) ?? Date()
-        self.appName = nil
+        let fallbackStart = start ?? Self.headerDateFormatter.date(from: datePart) ?? Date()
+        let manifestURL = Self.manifestURL(for: existingNote)
+        let manifest = RecordingManifestStore.loadIfPresent(from: manifestURL)
+        self.start = manifest?.startedAt ?? fallbackStart
+        self.appName = manifest?.source.appName
+        self.sourceBundleID = manifest?.source.bundleID
+        self.trigger = manifest?.source.trigger ?? .manual
+        self.id = manifest?.id ?? UUID()
     }
 
     /// `2026-07-14-q2-fba-qbr` (note filename without the `.md` extension).
@@ -81,12 +100,26 @@ struct RecordingSession: Sendable {
     var mixURL: URL { assetDir.appendingPathComponent("audio.m4a") }
     var transcriptMD: URL { noteURL }
     var transcriptJSON: URL { assetDir.appendingPathComponent("transcript.json") }
+    var manifestURL: URL { assetDir.appendingPathComponent("manifest.json") }
 
     func createFolder() throws {
         try FileManager.default.createDirectory(at: assetDir, withIntermediateDirectories: true)
         try FileManager.default.setAttributes(
             [.posixPermissions: NSNumber(value: Int16(0o700))],
             ofItemAtPath: assetDir.path)
+        try ensureManifest()
+    }
+
+    func ensureManifest() throws {
+        guard !FileManager.default.fileExists(atPath: manifestURL.path) else { return }
+        try RecordingManifestStore.write(
+            .initial(
+                id: id,
+                startedAt: start,
+                appName: appName,
+                bundleID: sourceBundleID,
+                trigger: trigger),
+            to: manifestURL)
     }
 
     func secureFile(_ url: URL) throws {
@@ -99,7 +132,18 @@ struct RecordingSession: Sendable {
     func removeAssetDirectoryIfEmpty() {
         let fm = FileManager.default
         guard let contents = try? fm.contentsOfDirectory(atPath: assetDir.path),
-              contents.isEmpty else { return }
+              contents.isEmpty || contents == ["manifest.json"]
+        else {
+            return
+        }
         try? fm.removeItem(at: assetDir)
+    }
+
+    private static func manifestURL(for noteURL: URL) -> URL {
+        let basename = noteURL.deletingPathExtension().lastPathComponent
+        return noteURL.deletingLastPathComponent()
+            .appendingPathComponent(".assets", isDirectory: true)
+            .appendingPathComponent(basename, isDirectory: true)
+            .appendingPathComponent("manifest.json")
     }
 }

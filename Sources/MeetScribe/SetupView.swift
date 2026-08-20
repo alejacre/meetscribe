@@ -53,7 +53,10 @@ struct SetupView: View {
     private var welcomeStep: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Welcome to MeetScribe").font(.title2).bold()
-            Text("MeetScribe records meetings and transcribes them locally on your Mac. Optional Claude cleanup sends a transcript to your configured Claude service only after you explicitly enable it.")
+            Text(
+                "MeetScribe records meetings and transcribes them locally on your Mac. "
+                    + "An optional transcript agent can process the result after you explicitly enable it."
+            )
                 .foregroundStyle(.secondary)
         }
     }
@@ -71,7 +74,7 @@ struct SetupView: View {
                     Text(p).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
                 }
             case .missing:
-                Text("Not found. MeetScribe can install it for you with **uv** (installs uv first if needed).")
+                Text("Not found. MeetScribe can install it with an existing **uv** installation.")
                 Button("Install mlx-whisper") { model.installEngine() }
                     .buttonStyle(.borderedProminent)
             case .working:
@@ -183,14 +186,17 @@ struct SetupView: View {
 
     private var cleanupStep: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Optional Claude cleanup sends the complete transcript to the service configured by your Claude CLI. MeetScribe disables Claude tools and session persistence for this request.")
+            Text(
+                "Claude Code is the built-in transcript agent. Enabling it sends the complete transcript "
+                    + "to the service configured by your Claude CLI. Tools and session persistence are disabled."
+            )
                 .foregroundStyle(.secondary)
             switch model.claudeFound {
             case .some(true): Label("Claude CLI found", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
             case .some(false): Label("Claude CLI not found (cleanup will be skipped)", systemImage: "info.circle").foregroundStyle(.secondary)
             case .none: EmptyView()
             }
-            Toggle("Send transcripts to Claude for cleanup", isOn: Binding(
+            Toggle("Process transcripts with Claude Code", isOn: Binding(
                 get: { model.claudeEnabled }, set: { model.setClaudeEnabled($0) }))
         }
     }

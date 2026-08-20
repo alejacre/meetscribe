@@ -24,6 +24,48 @@ final class RecordingCoordinatorTests: XCTestCase {
         XCTAssertEqual(state.phase, .idle)
     }
 
+    func testSuccessfulTranscriptionClearsOnlyTranscriptionFailure() {
+        let state = AppState()
+        let coordinator = RecordingCoordinator(
+            state: state,
+            enableSystemIntegrations: false)
+
+        state.lastError = "Transcription failed: temporary failure"
+        coordinator.clearTranscriptionFailure()
+        XCTAssertNil(state.lastError)
+
+        state.lastError = "Publishing failed: repository unavailable"
+        coordinator.clearTranscriptionFailure()
+        XCTAssertEqual(state.lastError, "Publishing failed: repository unavailable")
+    }
+
+    func testPromptRecordingTargetsSelectedMeetingApplication() async {
+        let recorder = CapturingFailingRecorder()
+        let coordinator = RecordingCoordinator(
+            state: AppState(),
+            recorderFactory: { recorder },
+            enableSystemIntegrations: false)
+        let meeting = DetectedMeeting(
+            bundleID: "com.microsoft.teams2",
+            appName: "teams")
+
+        await coordinator.startRecording(trigger: .meetingPrompt, meeting: meeting)
+
+        XCTAssertEqual(recorder.targetBundleID, meeting.bundleID)
+    }
+
+    func testManualRecordingDoesNotInheritMeetingTarget() async {
+        let recorder = CapturingFailingRecorder()
+        let coordinator = RecordingCoordinator(
+            state: AppState(),
+            recorderFactory: { recorder },
+            enableSystemIntegrations: false)
+
+        await coordinator.startRecording()
+
+        XCTAssertNil(recorder.targetBundleID)
+    }
+
     private enum TestError: Error { case expected }
 
     private final class SuspendedRecorder: AudioRecording, @unchecked Sendable {
@@ -44,5 +86,18 @@ final class RecordingCoordinatorTests: XCTestCase {
         }
 
         func stop() async throws { stopCount += 1 }
+    }
+
+    private final class CapturingFailingRecorder: AudioRecording, @unchecked Sendable {
+        var sourceWarning: String?
+        var onStreamDied: ((Error) -> Void)?
+        private(set) var targetBundleID: String?
+
+        func start(session: RecordingSession, targetBundleID: String?) async throws {
+            self.targetBundleID = targetBundleID
+            throw TestError.expected
+        }
+
+        func stop() async throws {}
     }
 }
