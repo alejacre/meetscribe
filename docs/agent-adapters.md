@@ -1,0 +1,81 @@
+# Transcript Agent Adapters
+
+MeetScribe supports a built-in Claude Code adapter and a provider-neutral custom command.
+
+## Custom Command Contract
+
+The configured executable:
+
+1. Receives the complete raw MeetScribe Markdown transcript on stdin.
+2. Receives configured arguments directly through `Process`; no shell is used.
+3. Receives the configured prompt in the argument containing `{prompt}`. If no argument contains the placeholder, the prompt is appended as the final argument.
+4. Writes the processed Markdown to stdout.
+5. Exits with status `0` on success.
+
+The executable path must be absolute and executable.
+
+By default, the process receives only `HOME`, `PATH`, `TMPDIR`, `LANG`, and `USER`. Full environment inheritance is an explicit setting because environment variables can contain credentials.
+
+## Output
+
+The optional first line is:
+
+```markdown
+<!-- topic: lowercase-topic-slug -->
+```
+
+It is removed before the note is saved and may rename the note. The remaining output must:
+
+- Preserve YAML frontmatter exactly
+- Add `## Summary` before `## Transcript`
+- Preserve the trailing `<!-- meetscribe: ... -->` metadata comment exactly
+- Preserve every timestamp and `**Me:**` / `**Them:**` turn marker in order
+
+Example:
+
+```markdown
+<!-- topic: project-review -->
+---
+date: 2026-08-20
+attendees: []
+tags: [meeting, transcript]
+---
+
+## Summary
+The team reviewed the project.
+
+## Transcript
+[00:00:03] **Me:** Welcome.
+
+<!-- meetscribe: app=zoom, duration=00:10:00, model=example, cleaned=false, processor=none -->
+```
+
+MeetScribe rejects structurally unsafe output and keeps the raw local transcript.
+
+## Example Adapter
+
+This minimal executable forwards stdin to an agent CLI that accepts a prompt argument:
+
+```bash
+#!/bin/sh
+exec /absolute/path/to/agent --prompt "$1"
+```
+
+Configure its arguments as:
+
+```text
+{prompt}
+```
+
+Use an absolute executable path and avoid wrapper scripts when the target CLI can already read stdin. Wrapper scripts execute with the current user's permissions and are part of the trusted computing base.
+
+## Built-in Claude Code Adapter
+
+The Claude Code adapter invokes the local CLI in print mode with:
+
+- Tools disabled
+- Strict empty MCP configuration
+- Session persistence disabled
+- Restricted environment variables
+
+Authentication and service selection remain owned by the user's Claude Code installation. Enabling the adapter sends the complete transcript to that configured service.

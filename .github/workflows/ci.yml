@@ -4,20 +4,33 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: macos-15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain
-        run: swift --version
+        run: |
+          swift --version
+          xcodebuild -version
       - name: Strict build
         run: swift build -Xswiftc -warnings-as-errors
       - name: Tests with coverage
+        env:
+          TEST_TIMEOUT_SECONDS: "600"
         run: scripts/check-coverage.sh
       - name: Release build
         run: swift build -c release -Xswiftc -warnings-as-errors
       - name: Validate metadata and scripts
         run: |
           plutil -lint Info.plist MeetScribe.entitlements
-          bash -n build.sh install.sh scripts/release.sh scripts/check-coverage.sh
+          bash -n build.sh install.sh scripts/release.sh scripts/check-coverage.sh scripts/run-tests.sh scripts/check-docs.sh
+          scripts/check-docs.sh

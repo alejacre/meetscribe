@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alejacre/meetscribe/blob/master/docs/recording-manifest.schema.json",
+  "title": "MeetScribe recording manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "startedAt",
+    "source",
+    "lifecycle",
+    "destinations"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "endedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trigger"
+      ],
+      "properties": {
+        "appName": {
+          "type": "string"
+        },
+        "bundleID": {
+          "type": "string"
+        },
+        "trigger": {
+          "enum": [
+            "manual",
+            "hotKey",
+            "meetingPrompt",
+            "meetingAutomatic"
+          ]
+        }
+      }
+    },
+    "lifecycle": {
+      "enum": [
+        "recording",
+        "recorded",
+        "transcribing",
+        "ready",
+        "failed"
+      ]
+    },
+    "transcript": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "completedAt",
+        "model"
+      ],
+      "properties": {
+        "completedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "model": {
+          "type": "string"
+        },
+        "processorID": {
+          "type": "string"
+        }
+      }
+    },
+    "publicationRequestedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "destinations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "destinationID",
+          "configurationFingerprint",
+          "phase",
+          "attempts"
+        ],
+        "properties": {
+          "destinationID": {
+            "type": "string"
+          },
+          "configurationFingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "phase": {
+            "enum": [
+              "pending",
+              "publishing",
+              "succeeded",
+              "failed"
+            ]
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  }
+}
