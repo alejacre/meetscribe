@@ -1,10 +1,8 @@
 <div align="center">
-  <img src="site/assets/app-icon.png" width="112" height="112" alt="MeetScribe app icon">
+  <img src="Assets/icon-1024.png" width="112" height="112" alt="MeetScribe app icon">
   <h1>MeetScribe</h1>
   <p><strong>Local-first meeting capture for macOS, with agents and storage you control.</strong></p>
   <p>
-    <a href="https://alejacre.github.io/meetscribe/">Website</a>
-    ·
     <a href="#build-from-source">Build from source</a>
     ·
     <a href="CONTRIBUTING.md">Contribute</a>
@@ -17,7 +15,7 @@
   </p>
 </div>
 
-![MeetScribe product preview](site/assets/product-preview.png)
+![MeetScribe product preview](.github/assets/product-preview.png)
 
 MeetScribe is an open source macOS menu bar app that records meetings, transcribes
 them locally with MLX Whisper, optionally processes the Markdown with a CLI agent,

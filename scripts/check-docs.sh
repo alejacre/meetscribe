@@ -35,6 +35,5 @@ unless missing.empty?
 end
 RUBY
 
-node scripts/check-site.mjs
 git diff --check
 echo "Documentation checks passed"
