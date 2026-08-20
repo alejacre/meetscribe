@@ -1,6 +1,8 @@
 import Foundation
 
 struct Settings: @unchecked Sendable {
+    static let outputFolderChanged = Notification.Name("meetscribe.outputFolderChanged")
+
     private let d: UserDefaults
     init(defaults: UserDefaults = .standard) { self.d = defaults }
 
@@ -20,7 +22,12 @@ struct Settings: @unchecked Sendable {
     var outputFolder: URL {
         get { d.string(forKey: Key.outputFolder).map { URL(fileURLWithPath: $0) }
               ?? URL(fileURLWithPath: NSHomeDirectory() + "/Recordings") }
-        set { d.set(newValue.path, forKey: Key.outputFolder) }
+        set {
+            let path = newValue.standardizedFileURL.path
+            guard d.string(forKey: Key.outputFolder) != path else { return }
+            d.set(path, forKey: Key.outputFolder)
+            NotificationCenter.default.post(name: Self.outputFolderChanged, object: nil)
+        }
     }
     var whisperModel: String {
         get { d.string(forKey: Key.whisperModel) ?? "mlx-community/whisper-large-v3-turbo" }

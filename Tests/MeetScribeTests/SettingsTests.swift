@@ -34,6 +34,17 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(s2.screenPermissionRequested)
     }
 
+    func testChangingOutputFolderPostsNotification() {
+        let notification = expectation(
+            forNotification: Settings.outputFolderChanged,
+            object: nil)
+        var settings = Settings(defaults: defaults)
+
+        settings.outputFolder = URL(fileURLWithPath: "/tmp/changed-recordings")
+
+        wait(for: [notification], timeout: 1)
+    }
+
     func testSetupCompletedDefaultsFalseAndPersists() {
         var s = Settings(defaults: defaults)
         XCTAssertFalse(s.setupCompleted)

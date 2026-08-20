@@ -61,6 +61,9 @@ final class RecordingDestinationTests: XCTestCase {
             .invalidRelativePath,
             .invalidSFTPHost,
             .invalidRemotePath,
+            .sftpReplacementRecoveryFailed(
+                operation: "replace failed",
+                recovery: "restore failed"),
         ]
         XCTAssertTrue(errors.allSatisfy { !($0.errorDescription ?? "").isEmpty })
         XCTAssertTrue(
@@ -68,18 +71,55 @@ final class RecordingDestinationTests: XCTestCase {
                 .errorDescription?.contains("other.txt") == true)
     }
 
-    func testSFTPBatchUsesTemporaryDirectoryAndAtomicRename() throws {
-        let batch = try SFTPBatch.commands(
+    func testSFTPBatchStagesThenFinalizesTemporaryDirectory() throws {
+        let upload = try SFTPBatch.uploadCommands(
             localDirectory: URL(fileURLWithPath: "/tmp/meeting \"one\""),
+            remoteRoot: "/srv/recordings",
+            uploadID: "upload-1")
+        let finalize = try SFTPBatch.finalizeCommands(
             remoteRoot: "/srv/recordings",
             finalDirectory: "2026-08-20-planning",
             uploadID: "upload-1")
 
-        XCTAssertTrue(batch.contains("-mkdir \"/srv/recordings/.meetscribe-incoming\""))
-        XCTAssertTrue(batch.contains(
+        XCTAssertTrue(upload.contains("-mkdir \"/srv/recordings/.meetscribe-incoming\""))
+        XCTAssertTrue(upload.contains(
             "put -R \"/tmp/meeting \\\"one\\\"\" \"/srv/recordings/.meetscribe-incoming/upload-1\""))
-        XCTAssertTrue(batch.contains(
+        XCTAssertTrue(finalize.contains(
             "rename \"/srv/recordings/.meetscribe-incoming/upload-1\" \"/srv/recordings/2026-08-20-planning\""))
+    }
+
+    func testSFTPReplacementBatchesMovePromoteRestoreAndClean() throws {
+        let backup = try SFTPBatch.backupCommands(
+            remoteRoot: "/srv/recordings",
+            finalDirectory: "2026-08-20-planning",
+            backupID: "backup-1")
+        let promote = try SFTPBatch.promoteCommands(
+            remoteRoot: "/srv/recordings",
+            finalDirectory: "2026-08-20-planning",
+            uploadID: "upload-1")
+        let restore = try SFTPBatch.restoreCommands(
+            remoteRoot: "/srv/recordings",
+            finalDirectory: "2026-08-20-planning",
+            backupID: "backup-1")
+        let cleanup = try SFTPBatch.cleanupCommands(
+            remoteRoot: "/srv/recordings",
+            finalDirectory: "2026-08-20-planning",
+            backupID: "backup-1")
+
+        XCTAssertTrue(backup.contains(
+            "-rename \"/srv/recordings/2026-08-20-planning\" "
+                + "\"/srv/recordings/.meetscribe-incoming/backup-1\""))
+        XCTAssertTrue(promote.contains(
+            "rename \"/srv/recordings/.meetscribe-incoming/upload-1\" "
+                + "\"/srv/recordings/2026-08-20-planning\""))
+        XCTAssertTrue(restore.contains(
+            "-rename \"/srv/recordings/.meetscribe-incoming/backup-1\" "
+                + "\"/srv/recordings/2026-08-20-planning\""))
+        XCTAssertTrue(cleanup.contains(
+            "-rm \"/srv/recordings/.meetscribe-incoming/backup-1/"
+                + ".assets/2026-08-20-planning/audio.m4a\""))
+        XCTAssertTrue(cleanup.contains(
+            "-rmdir \"/srv/recordings/.meetscribe-incoming/backup-1\""))
     }
 
     func testSFTPValidationChecksQuotedRemoteFolder() throws {
@@ -122,15 +162,81 @@ final class RecordingDestinationTests: XCTestCase {
         XCTAssertFalse(destination.includeAudio)
         XCTAssertEqual(destination.configurationFingerprint.count, 64)
         let calls = spy.snapshot
-        XCTAssertEqual(calls.count, 2)
+        XCTAssertEqual(calls.count, 3)
         XCTAssertEqual(calls[0].executable, "/usr/bin/sftp")
         XCTAssertEqual(calls[0].arguments.last, "archive")
         XCTAssertEqual(calls[0].timeout, 30)
         XCTAssertTrue(calls[0].stdin?.contains("cd \"/srv/meetings\"") == true)
         XCTAssertEqual(calls[1].timeout, 600)
         XCTAssertTrue(calls[1].stdin?.contains("put -R") == true)
-        XCTAssertTrue(calls[1].stdin?.contains("rename") == true)
         XCTAssertNotNil(calls[1].environment)
+        XCTAssertEqual(calls[2].timeout, 60)
+        XCTAssertTrue(calls[2].stdin?.contains("rename") == true)
+    }
+
+    func testSFTPPublishFallsBackToReplacementWhenFinalDirectoryExists() throws {
+        let root = try temporaryDirectory("sftp-republish")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = try populatedSession(root: root.appendingPathComponent("recordings"))
+        let package = try RecordingExportPackage(session: session, includeAudio: false)
+        let spy = CommandSpy(failingCallIndexes: [1])
+        let destination = SFTPDestination(configuration: SFTPDestinationConfiguration(
+            enabled: true,
+            host: "archive",
+            remotePath: "/srv/meetings",
+            includeAudio: false), runner: spy.runner)
+
+        try destination.publish(package)
+
+        let calls = spy.snapshot
+        XCTAssertEqual(calls.count, 5)
+        XCTAssertTrue(calls[0].stdin?.contains("put -R") == true)
+        XCTAssertTrue(calls[1].stdin?.contains("rename ") == true)
+        XCTAssertTrue(calls[2].stdin?.contains("-rename ") == true)
+        XCTAssertTrue(calls[3].stdin?.contains("rename ") == true)
+        XCTAssertTrue(calls[4].stdin?.contains("-rmdir ") == true)
+    }
+
+    func testSFTPPromotionFailureAttemptsBackupRestore() throws {
+        let root = try temporaryDirectory("sftp-restore")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = try populatedSession(root: root.appendingPathComponent("recordings"))
+        let package = try RecordingExportPackage(session: session, includeAudio: false)
+        let spy = CommandSpy(failingCallIndexes: [1, 3])
+        let destination = SFTPDestination(configuration: SFTPDestinationConfiguration(
+            enabled: true,
+            host: "archive",
+            remotePath: "/srv/meetings",
+            includeAudio: false), runner: spy.runner)
+
+        XCTAssertThrowsError(try destination.publish(package))
+
+        let calls = spy.snapshot
+        XCTAssertEqual(calls.count, 5)
+        XCTAssertTrue(calls[2].stdin?.contains("-rename ") == true)
+        XCTAssertTrue(calls[3].stdin?.contains("rename ") == true)
+        XCTAssertTrue(calls[4].stdin?.contains("-rename ") == true)
+    }
+
+    func testSFTPReportsWhenPromotionAndRestoreBothFail() throws {
+        let root = try temporaryDirectory("sftp-restore-failure")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = try populatedSession(root: root.appendingPathComponent("recordings"))
+        let package = try RecordingExportPackage(session: session, includeAudio: false)
+        let spy = CommandSpy(failingCallIndexes: [1, 3, 4])
+        let destination = SFTPDestination(configuration: SFTPDestinationConfiguration(
+            enabled: true,
+            host: "archive",
+            remotePath: "/srv/meetings",
+            includeAudio: false), runner: spy.runner)
+
+        XCTAssertThrowsError(try destination.publish(package)) { error in
+            guard case DestinationError.sftpReplacementRecoveryFailed = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+            XCTAssertTrue(error.localizedDescription.contains("Restoring"))
+        }
+        XCTAssertEqual(spy.snapshot.count, 5)
     }
 
     func testSFTPSuccessfulValidationNormalizesRemotePaths() throws {
@@ -317,20 +423,30 @@ final class RecordingDestinationTests: XCTestCase {
         private let lock = NSLock()
         private var calls: [Call] = []
         private let result: String
+        private let failingCallIndexes: Set<Int>
 
-        init(result: String = "") {
+        init(
+            result: String = "",
+            failingCallIndexes: Set<Int> = []
+        ) {
             self.result = result
+            self.failingCallIndexes = failingCallIndexes
         }
 
         var runner: DestinationCommandRunner {
             DestinationCommandRunner { [self] executable, arguments, stdin, timeout, environment in
-                lock.withLock {
+                let callIndex = lock.withLock {
+                    let callIndex = calls.count
                     calls.append(Call(
                         executable: executable,
                         arguments: arguments,
                         stdin: stdin,
                         timeout: timeout,
                         environment: environment))
+                    return callIndex
+                }
+                if failingCallIndexes.contains(callIndex) {
+                    throw CommandSpyError.expectedFailure
                 }
                 return result
             }
@@ -339,5 +455,9 @@ final class RecordingDestinationTests: XCTestCase {
         var snapshot: [Call] {
             lock.withLock { calls }
         }
+    }
+
+    private enum CommandSpyError: Error {
+        case expectedFailure
     }
 }

@@ -16,7 +16,10 @@ final class AudioRecorder: NSObject, AudioRecording, SCStreamOutput, SCStreamDel
     private var session: RecordingSession?
     private let queue = DispatchQueue(label: "meetscribe.audio")
     private let stateLock = NSLock()
-    private(set) var sourceWarning: String?
+    private var sourceWarningValue: String?
+    var sourceWarning: String? {
+        stateLock.withLock { sourceWarningValue }
+    }
     /// Fired when the capture stream dies out from under us (display sleep,
     /// permission revoked); audio written so far stays on disk.
     private var streamDiedHandler: ((Error) -> Void)?
@@ -26,6 +29,7 @@ final class AudioRecorder: NSObject, AudioRecording, SCStreamOutput, SCStreamDel
     }
 
     func start(session: RecordingSession, targetBundleID: String? = nil) async throws {
+        stateLock.withLock { sourceWarningValue = nil }
         try session.createFolder()
         self.session = session
         let content = try await SCShareableContent.current
@@ -110,7 +114,9 @@ final class AudioRecorder: NSObject, AudioRecording, SCStreamOutput, SCStreamDel
             default: break
             }
         } catch {
-            sourceWarning = "A capture source failed: \(error.localizedDescription)"
+            stateLock.withLock {
+                sourceWarningValue = "A capture source failed: \(error.localizedDescription)"
+            }
         }
     }
 

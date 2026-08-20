@@ -90,6 +90,7 @@ enum DestinationError: Error, LocalizedError {
     case invalidRelativePath
     case invalidSFTPHost
     case invalidRemotePath
+    case sftpReplacementRecoveryFailed(operation: String, recovery: String)
 
     var errorDescription: String? {
         switch self {
@@ -109,6 +110,8 @@ enum DestinationError: Error, LocalizedError {
             "Enter an SSH host or alias that does not start with '-'."
         case .invalidRemotePath:
             "Enter an SFTP destination path without control characters."
+        case .sftpReplacementRecoveryFailed(let operation, let recovery):
+            "SFTP replacement failed: \(operation). Restoring the previous publication also failed: \(recovery)"
         }
     }
 }
@@ -262,17 +265,57 @@ struct SFTPDestination: RecordingDestination {
         try FileManager.default.createDirectory(at: localPackage, withIntermediateDirectories: true)
         try package.materialize(at: localPackage)
 
-        let batch = try SFTPBatch.commands(
-            localDirectory: localPackage,
-            remoteRoot: remoteRoot,
-            finalDirectory: package.basename,
-            uploadID: "\(package.recordingID.uuidString.lowercased())-\(UUID().uuidString.lowercased())")
+        let uploadID = "\(package.recordingID.uuidString.lowercased())-\(UUID().uuidString.lowercased())"
         _ = try runner.run(
             "/usr/bin/sftp",
             Self.arguments(host: configuration.host),
-            batch,
+            try SFTPBatch.uploadCommands(
+                localDirectory: localPackage,
+                remoteRoot: remoteRoot,
+                uploadID: uploadID),
             600,
             ProcessInfo.processInfo.environment)
+
+        do {
+            try runBatch(try SFTPBatch.finalizeCommands(
+                remoteRoot: remoteRoot,
+                finalDirectory: package.basename,
+                uploadID: uploadID))
+        } catch {
+            let backupID = "\(package.recordingID.uuidString.lowercased())-\(UUID().uuidString.lowercased())"
+            do {
+                try runBatch(try SFTPBatch.backupCommands(
+                    remoteRoot: remoteRoot,
+                    finalDirectory: package.basename,
+                    backupID: backupID))
+            } catch let backupError {
+                try restoreBackupOrThrow(
+                    remoteRoot: remoteRoot,
+                    finalDirectory: package.basename,
+                    backupID: backupID,
+                    operationError: backupError)
+                throw backupError
+            }
+
+            do {
+                try runBatch(try SFTPBatch.promoteCommands(
+                    remoteRoot: remoteRoot,
+                    finalDirectory: package.basename,
+                    uploadID: uploadID))
+            } catch let promotionError {
+                try restoreBackupOrThrow(
+                    remoteRoot: remoteRoot,
+                    finalDirectory: package.basename,
+                    backupID: backupID,
+                    operationError: promotionError)
+                throw promotionError
+            }
+
+            try runBatch(try SFTPBatch.cleanupCommands(
+                remoteRoot: remoteRoot,
+                finalDirectory: package.basename,
+                backupID: backupID))
+        }
     }
 
     static func validateHost(_ host: String) throws {
@@ -305,6 +348,33 @@ struct SFTPDestination: RecordingDestination {
             host,
         ]
     }
+
+    private func runBatch(_ commands: String) throws {
+        _ = try runner.run(
+            "/usr/bin/sftp",
+            Self.arguments(host: configuration.host),
+            commands,
+            60,
+            ProcessInfo.processInfo.environment)
+    }
+
+    private func restoreBackupOrThrow(
+        remoteRoot: String,
+        finalDirectory: String,
+        backupID: String,
+        operationError: Error
+    ) throws {
+        do {
+            try runBatch(try SFTPBatch.restoreCommands(
+                remoteRoot: remoteRoot,
+                finalDirectory: finalDirectory,
+                backupID: backupID))
+        } catch let recoveryError {
+            throw DestinationError.sftpReplacementRecoveryFailed(
+                operation: operationError.localizedDescription,
+                recovery: recoveryError.localizedDescription)
+        }
+    }
 }
 
 enum SFTPBatch {
@@ -315,8 +385,44 @@ enum SFTPBatch {
         """
     }
 
-    static func commands(
+    static func uploadCommands(
         localDirectory: URL,
+        remoteRoot: String,
+        uploadID: String
+    ) throws -> String {
+        let incomingRoot = "\(remoteRoot)/.meetscribe-incoming"
+        let remoteTemporary = "\(incomingRoot)/\(uploadID)"
+        return """
+            -mkdir \(try quote(incomingRoot))
+            put -R \(try quote(localDirectory.path)) \(try quote(remoteTemporary))
+            """
+    }
+
+    static func finalizeCommands(
+        remoteRoot: String,
+        finalDirectory: String,
+        uploadID: String
+    ) throws -> String {
+        let incomingRoot = "\(remoteRoot)/.meetscribe-incoming"
+        return """
+            rename \(try quote("\(incomingRoot)/\(uploadID)")) \(try quote("\(remoteRoot)/\(finalDirectory)"))
+            """
+    }
+
+    static func backupCommands(
+        remoteRoot: String,
+        finalDirectory: String,
+        backupID: String
+    ) throws -> String {
+        let incomingRoot = "\(remoteRoot)/.meetscribe-incoming"
+        let remoteFinal = "\(remoteRoot)/\(finalDirectory)"
+        let remoteBackup = "\(incomingRoot)/\(backupID)"
+        return """
+            -rename \(try quote(remoteFinal)) \(try quote(remoteBackup))
+            """
+    }
+
+    static func promoteCommands(
         remoteRoot: String,
         finalDirectory: String,
         uploadID: String
@@ -325,10 +431,45 @@ enum SFTPBatch {
         let remoteTemporary = "\(incomingRoot)/\(uploadID)"
         let remoteFinal = "\(remoteRoot)/\(finalDirectory)"
         return """
-            -mkdir \(try quote(incomingRoot))
-            put -R \(try quote(localDirectory.path)) \(try quote(remoteTemporary))
             rename \(try quote(remoteTemporary)) \(try quote(remoteFinal))
             """
+    }
+
+    static func restoreCommands(
+        remoteRoot: String,
+        finalDirectory: String,
+        backupID: String
+    ) throws -> String {
+        let incomingRoot = "\(remoteRoot)/.meetscribe-incoming"
+        let remoteFinal = "\(remoteRoot)/\(finalDirectory)"
+        let remoteBackup = "\(incomingRoot)/\(backupID)"
+        return """
+            -rename \(try quote(remoteBackup)) \(try quote(remoteFinal))
+            """
+    }
+
+    static func cleanupCommands(
+        remoteRoot: String,
+        finalDirectory: String,
+        backupID: String
+    ) throws -> String {
+        let incomingRoot = "\(remoteRoot)/.meetscribe-incoming"
+        let remoteBackup = "\(incomingRoot)/\(backupID)"
+        let backupAssets = "\(remoteBackup)/.assets/\(finalDirectory)"
+        let knownFiles = [
+            "\(remoteBackup)/\(finalDirectory).md",
+            "\(backupAssets)/manifest.json",
+            "\(backupAssets)/transcript.json",
+            "\(backupAssets)/audio.m4a",
+            "\(backupAssets)/mic.m4a",
+            "\(backupAssets)/system.m4a",
+        ]
+        let cleanup = try knownFiles.map { "-rm \(try quote($0))" } + [
+            "-rmdir \(try quote(backupAssets))",
+            "-rmdir \(try quote("\(remoteBackup)/.assets"))",
+            "-rmdir \(try quote(remoteBackup))",
+        ]
+        return cleanup.joined(separator: "\n") + "\n"
     }
 
     private static func quote(_ value: String) throws -> String {

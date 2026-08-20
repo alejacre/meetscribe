@@ -11,11 +11,14 @@ CoreAudio meeting detection / manual action
           RecordingCoordinator
                     |
                     v
+    RecordingBackgroundWorkController
+                    |
+                    v
         RecordingSession + manifest
                     |
             AudioRecorder
                     |
-             Transcriber
+   RecordingTranscriptionService
                     |
          TranscriptProcessing
                     |
@@ -39,6 +42,14 @@ Notification actions carry the meeting bundle identifier so simultaneous prompts
 `RecordingSession` owns note and sidecar paths. `RecordingManifest` gives every recording a stable UUID and persists source, lifecycle, transcript, and destination state. The manifest is written atomically with mode `0600`; its asset directory uses `0700`.
 
 The manifest schema is versioned. Incompatible changes require an explicit migration and schema update.
+
+Topic-based renames write a private move journal before changing either the note
+or its asset directory. Library refresh completes or rolls back an interrupted
+rename before exposing recordings.
+
+Transcript search uses an actor-isolated incremental index. It refreshes only
+Markdown files whose size or modification date changed, removes deleted notes,
+and performs matching away from the main actor with cancellation between lines.
 
 ### Transcript Agent
 
@@ -71,7 +82,11 @@ Prefer the generic command adapter when it can express the integration without p
 
 ## Concurrency
 
-Recording runs on the main actor while transcription and publication run in detached utility tasks. Per-recording path sets prevent duplicate transcription or publication in one process. Manifest writes are serialized and atomic for recovery across restarts.
+Recording runs on the main actor. `RecordingBackgroundWorkController` owns
+deduplication, counters, notifications, and detached transcription/publication
+jobs, while `RecordingTranscriptionService` owns the local transformation
+pipeline. Manifest reads and writes are serialized; move journals and atomic
+manifest writes provide recovery across restarts.
 
 ## Trust Model
 

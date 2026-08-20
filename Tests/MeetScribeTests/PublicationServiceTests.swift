@@ -94,6 +94,26 @@ final class PublicationServiceTests: XCTestCase {
             configuration: configuration))
     }
 
+    func testPublicationReportsWhenFailureStateCannotBePersisted() throws {
+        let root = try temporaryDirectory("publication-manifest-failure")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = RecordingSession(root: root, start: Date(), appName: nil)
+        try session.createFolder()
+        try Data("# Transcript\n".utf8).write(to: session.noteURL)
+        let destination = CorruptingDestination()
+
+        let result = try XCTUnwrap(PublicationService.publish(
+            session: session,
+            destinations: [destination]).first)
+
+        XCTAssertFalse(result.succeeded)
+        XCTAssertTrue(
+            result.errorDescription?.contains("destination failed") == true)
+        XCTAssertTrue(
+            result.errorDescription?.contains(
+                "Recovery state could not be saved") == true)
+    }
+
     private func temporaryDirectory(_ label: String) throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("meetscribe-\(label)-\(UUID().uuidString)", isDirectory: true)
@@ -104,5 +124,31 @@ final class PublicationServiceTests: XCTestCase {
     @discardableResult
     private func runGit(_ arguments: [String]) throws -> String {
         try Subprocess.run("/usr/bin/git", arguments, timeout: 30)
+    }
+
+    private struct CorruptingDestination: RecordingDestination {
+        let id = "corrupting"
+        let displayName = "Corrupting destination"
+        let configurationFingerprint = "test"
+        let includeAudio = false
+
+        func validateConnection() throws {}
+
+        func publish(_ package: RecordingExportPackage) throws {
+            let manifest = try XCTUnwrap(
+                package.files.first { $0.relativePath.hasSuffix("manifest.json") })
+            try Data("not json".utf8).write(
+                to: manifest.sourceURL,
+                options: .atomic)
+            throw TestError.destinationFailed
+        }
+    }
+
+    private enum TestError: Error, LocalizedError {
+        case destinationFailed
+
+        var errorDescription: String? {
+            "destination failed"
+        }
     }
 }

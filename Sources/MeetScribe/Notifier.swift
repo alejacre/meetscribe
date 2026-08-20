@@ -52,12 +52,18 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
         case "RECORD":
             onRecordAction?(response.notification.request.content.userInfo["meetingBundleID"] as? String)
         case "RETRY":
-            if let note = noteURL(from: response.notification.request.content.userInfo) {
+            if let note = Self.noteURL(
+                from: response.notification.request.content.userInfo,
+                outputFolder: Settings().outputFolder)
+            {
                 onRetryAction?(note)
             }
         case UNNotificationDefaultActionIdentifier:
             // Tap on the notification body: open the meeting note if it has one.
-            if let note = noteURL(from: response.notification.request.content.userInfo) {
+            if let note = Self.noteURL(
+                from: response.notification.request.content.userInfo,
+                outputFolder: Settings().outputFolder)
+            {
                 let session = RecordingSession(existingNote: note)
                 NSWorkspace.shared.open(
                     FileManager.default.fileExists(atPath: note.path) ? note : session.assetDir)
@@ -66,7 +72,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
         }
     }
 
-    private func noteURL(from userInfo: [AnyHashable: Any]) -> URL? {
+    static func noteURL(
+        from userInfo: [AnyHashable: Any],
+        outputFolder: URL
+    ) -> URL? {
         if let path = userInfo["notePath"] as? String {
             let note = URL(fileURLWithPath: path).standardizedFileURL
             guard note.pathExtension == "md",
@@ -80,6 +89,6 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
               basename == URL(fileURLWithPath: basename).lastPathComponent,
               !basename.contains("/")
         else { return nil }
-        return Settings().outputFolder.appendingPathComponent(basename + ".md")
+        return outputFolder.appendingPathComponent(basename + ".md")
     }
 }

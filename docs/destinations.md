@@ -60,6 +60,14 @@ Publication uploads a complete package into:
 
 It then renames that temporary directory to the final recording name. Failed uploads remain outside the final name and can be retried.
 
+When the final directory already exists, MeetScribe first attempts the server's
+atomic rename extension. If the server rejects replacement, it moves the
+existing directory into the private incoming area, promotes the completed
+upload, and removes the known backup files. Backup and promotion are separate
+SFTP operations: if either operation has an ambiguous transport failure,
+MeetScribe attempts to restore the backup before reporting failure. Recoverable
+data remains under `.meetscribe-incoming` until a later retry or cleanup.
+
 Before enabling SFTP, verify the host key outside MeetScribe:
 
 ```bash

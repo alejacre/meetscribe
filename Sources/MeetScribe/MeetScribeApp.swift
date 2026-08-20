@@ -73,7 +73,10 @@ struct MeetScribeApp: App {
                     ForEach(state.recentRecordings) { record in
                         let session = RecordingSession(existingNote: record.noteURL)
                         Menu(record.basename) {
-                            Button("Open transcript") { NSWorkspace.shared.open(record.noteURL) }
+                            Button("Open transcript") {
+                                state.recordingBrowserSelection = record.noteURL
+                                openRecordingBrowser()
+                            }
                                 .disabled(!record.hasTranscript)
                             Button("Copy summary") { copySummary(session) }
                                 .disabled(!record.hasTranscript)
@@ -102,9 +105,13 @@ struct MeetScribeApp: App {
                     }
                 }
             }
+            Button("Browse recordings…") {
+                state.recordingBrowserSelection = nil
+                openRecordingBrowser()
+            }
             Button("Search transcripts…") {
-                openWindow(id: "search")
-                NSApp.activate(ignoringOtherApps: true)
+                state.recordingBrowserSearchRequested = true
+                openRecordingBrowser()
             }
             Button("Open recordings folder") { NSWorkspace.shared.open(Settings().outputFolder) }
             Divider()
@@ -128,8 +135,10 @@ struct MeetScribeApp: App {
                 .accessibilityLabel(menuBarAccessibilityLabel)
         }
         SwiftUI.Settings { SettingsView() }
-        Window("Search transcripts", id: "search") { SearchView() }
-            .windowResizability(.contentSize)
+        Window("Recordings", id: "recordings") {
+            RecordingsView(state: state)
+        }
+            .defaultSize(width: 1080, height: 720)
         Window("MeetScribe Setup", id: "setup") { SetupView() }
             .windowResizability(.contentSize)
             .defaultLaunchBehavior(firstRun ? .presented : .suppressed)
@@ -147,6 +156,11 @@ struct MeetScribeApp: App {
               let summary = TranscriptFormatter.extractSummary(md) else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(summary, forType: .string)
+    }
+
+    private func openRecordingBrowser() {
+        openWindow(id: "recordings")
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func openPrivacyPane(_ anchor: String) {

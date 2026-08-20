@@ -85,6 +85,12 @@ enum RecordingManifestStore {
     private static let lock = NSLock()
 
     static func load(from url: URL) throws -> RecordingManifest {
+        lock.lock()
+        defer { lock.unlock() }
+        return try loadUnlocked(from: url)
+    }
+
+    private static func loadUnlocked(from url: URL) throws -> RecordingManifest {
         let manifest = try decoder.decode(RecordingManifest.self, from: Data(contentsOf: url))
         guard manifest.schemaVersion == RecordingManifest.currentSchemaVersion else {
             throw RecordingManifestError.unsupportedSchemaVersion(manifest.schemaVersion)
@@ -105,7 +111,7 @@ enum RecordingManifestStore {
     static func update(at url: URL, _ update: (inout RecordingManifest) -> Void) throws {
         lock.lock()
         defer { lock.unlock() }
-        var manifest = try load(from: url)
+        var manifest = try loadUnlocked(from: url)
         update(&manifest)
         try writeUnlocked(manifest, to: url)
     }

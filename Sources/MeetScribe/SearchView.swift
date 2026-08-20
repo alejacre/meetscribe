@@ -1,42 +1,11 @@
 import SwiftUI
 
-struct SearchHit: Identifiable {
-    let id = UUID()
-    let folder: URL
-    let file: URL
-    let line: String
-}
-
-/// Case-insensitive grep over MEETSCRIBE meeting notes in the output folder. Scans
-/// `*.md` that own a `.assets/<basename>/` sidecar (so hand-curated vault notes are
-/// skipped). No index: at the current scale a direct scan is instant.
-enum TranscriptSearch {
-    static func search(_ query: String, root: URL) -> [SearchHit] {
-        let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return [] }
-        let fm = FileManager.default
-        let notes = ((try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [])
-            .filter { $0.pathExtension == "md" }
-            .filter { fm.fileExists(atPath: RecordingSession(existingNote: $0).assetDir.path) }
-            .sorted { $0.lastPathComponent > $1.lastPathComponent }
-        var hits: [SearchHit] = []
-        for md in notes {
-            guard let text = try? String(contentsOf: md, encoding: .utf8) else { continue }
-            for line in text.split(separator: "\n")
-            where line.localizedCaseInsensitiveContains(q) {
-                hits.append(SearchHit(folder: md, file: md,
-                                      line: line.trimmingCharacters(in: .whitespaces)))
-                if hits.count >= 100 { return hits }
-            }
-        }
-        return hits
-    }
-}
-
 struct SearchView: View {
     @State private var query = ""
     @State private var hits: [SearchHit] = []
     @State private var searched = false
+    @State private var searching = false
+    @State private var searchTask: Task<Void, Never>?
 
     init(
         query: String = "",
@@ -54,11 +23,13 @@ struct SearchView: View {
                 .textFieldStyle(.roundedBorder)
                 .padding(10)
                 .onSubmit {
-                    hits = TranscriptSearch.search(query, root: Settings().outputFolder)
-                    searched = true
+                    startSearch()
                 }
             Divider()
-            if hits.isEmpty {
+            if searching {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if hits.isEmpty {
                 Text(searched ? "No matches" : "Type a query and press Return")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -81,5 +52,29 @@ struct SearchView: View {
             }
         }
         .frame(width: 420, height: 320)
+        .onDisappear {
+            searchTask?.cancel()
+        }
+    }
+
+    private func startSearch() {
+        searchTask?.cancel()
+        let submittedQuery = query
+        let root = Settings().outputFolder
+        searched = false
+        searching = true
+        searchTask = Task { @MainActor in
+            let result = await TranscriptSearch.search(
+                submittedQuery,
+                root: root)
+            guard !Task.isCancelled else { return }
+            guard query == submittedQuery else {
+                searching = false
+                return
+            }
+            hits = result
+            searched = true
+            searching = false
+        }
     }
 }

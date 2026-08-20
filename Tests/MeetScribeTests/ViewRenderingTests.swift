@@ -102,6 +102,79 @@ final class ViewRenderingTests: XCTestCase {
         evaluate(SearchView(query: "matching", hits: [hit], searched: true))
     }
 
+    func testRecordingsViewBuilds() throws {
+        let root = try temporaryDirectory("recordings-view")
+        let state = AppState()
+
+        evaluate(RecordingsView(state: state, root: root))
+    }
+
+    func testRecordingBrowserRowsAndTranscriptStatesBuild() throws {
+        let root = try temporaryDirectory("recordings-content")
+        let session = RecordingSession(
+            root: root,
+            start: Date(),
+            appName: "zoom")
+        try session.createFolder()
+        let markdown = """
+        ---
+        date: 2026-08-20
+        tags: [meeting, transcript]
+        ---
+
+        ## Summary
+        The release checks are green.
+
+        ## Decisions
+        - Publish real screenshots.
+
+        ## Transcript
+        [00:00:02] **Me:** Let's review the release.
+        [00:00:06] **Them:** The build is green.
+
+        <!-- meetscribe: app=zoom, duration=00:12:48, model=test, cleaned=true, processor=test -->
+        """
+        try markdown.write(to: session.noteURL, atomically: true, encoding: .utf8)
+        let record = RecordingRecord(
+            noteURL: session.noteURL,
+            assetDir: session.assetDir,
+            modifiedAt: Date(),
+            manifest: RecordingManifestStore.loadIfPresent(from: session.manifestURL))
+        let document = TranscriptDocument.parse(
+            markdown,
+            filename: "2026-08-20-product-review")
+
+        evaluate(RecordingRow(record: record, document: document))
+        evaluate(TranscriptDetailView(record: record, document: document))
+        evaluate(TranscriptTurnRow(turn: document.turns[0]))
+        evaluate(TranscriptTurnRow(turn: document.turns[1]))
+        let warningRecord = RecordingRecord(
+            noteURL: record.noteURL,
+            assetDir: record.assetDir,
+            modifiedAt: record.modifiedAt,
+            manifest: record.manifest,
+            manifestError: "The manifest is not valid JSON.")
+        evaluate(RecordingRow(record: warningRecord, document: document))
+        evaluate(TranscriptDetailView(record: warningRecord, document: document))
+
+        let failed = RecordingSession(
+            root: root,
+            start: Date().addingTimeInterval(-60),
+            appName: "manual")
+        try failed.createFolder()
+        let failedRecord = RecordingRecord(
+            noteURL: failed.noteURL,
+            assetDir: failed.assetDir,
+            modifiedAt: Date(),
+            manifest: nil)
+        evaluate(RecordingRow(record: failedRecord, document: nil))
+
+        let legacy = TranscriptDocument.parse(
+            "## Transcript\nLegacy content without timestamped turns.",
+            filename: "2026-08-19-legacy")
+        evaluate(TranscriptDetailView(record: record, document: legacy))
+    }
+
     func testSetupViewBuildsEveryStepAndPhase() throws {
         let settings = try makeSettings("setup-view")
         let model = SetupModel(

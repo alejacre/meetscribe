@@ -42,9 +42,16 @@ enum Permissions {
     /// Opens a specific pane of System Settings › Privacy & Security. Anchors:
     /// `Privacy_ScreenCapture`, `Privacy_Microphone`.
     static func openPrivacyPane(_ anchor: String) {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)") {
+        if let url = privacyPaneURL(anchor) {
             NSWorkspace.shared.open(url)
         }
+    }
+
+    static func privacyPaneURL(_ anchor: String) -> URL? {
+        let supported = ["Privacy_ScreenCapture", "Privacy_Microphone"]
+        guard supported.contains(anchor) else { return nil }
+        return URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)")
     }
 
     static func openNotificationSettings() {

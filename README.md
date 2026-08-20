@@ -15,7 +15,9 @@
   </p>
 </div>
 
-![MeetScribe product preview](.github/assets/product-preview.png)
+![MeetScribe recordings browser showing a local transcript](.github/assets/recordings-window.png)
+
+_Real screenshot from the signed macOS application using fictional demo transcripts._
 
 MeetScribe is an open source macOS menu bar app that records meetings, transcribes
 them locally with MLX Whisper, optionally processes the Markdown with a CLI agent,
@@ -62,8 +64,9 @@ flowchart LR
 
 - Configurable triggers for Zoom, Slack, Amazon Chime, Microsoft Teams, FaceTime,
   Webex, and custom macOS bundle identifiers.
-- Native menu bar controls, recent recordings, transcript search, notifications,
-  launch at login, and the `Option+Shift+R` global shortcut.
+- Native menu bar controls and a recordings browser with full-text search,
+  summaries, decisions, timestamped turns, notifications, launch at login, and
+  the `Option+Shift+R` global shortcut.
 - Separate microphone and meeting-audio capture through ScreenCaptureKit.
 - Locked and verified MLX Whisper model revisions for Apple Silicon.
 - Claude Code adapter with tools and session persistence disabled.
@@ -197,9 +200,10 @@ scripts/check-docs.sh
 ```
 
 CI enforces the production line coverage threshold defined by
-`scripts/check-coverage.sh`. Tests do not require real meeting audio, network
-credentials, or access to an SFTP server. The Git integration test pushes only
-to a temporary local bare repository.
+`scripts/check-coverage.sh`, including per-file floors for critical operational
+paths. Tests do not require real meeting audio, network credentials, or access
+to an SFTP server. The Git integration test pushes only to a temporary local
+bare repository.
 
 ## Contributing
 

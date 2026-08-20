@@ -26,7 +26,10 @@ scripts/check-coverage.sh
 swift build -c release -Xswiftc -warnings-as-errors
 ```
 
-The coverage gate requires at least 70% production line coverage.
+The coverage gate requires at least 75% production line coverage and enforces
+separate floors for recovery, publication, background work, search, and the
+macOS integration adapters. This prevents well-tested formatter or view code
+from masking regressions in operational paths.
 
 Build the application bundle:
 

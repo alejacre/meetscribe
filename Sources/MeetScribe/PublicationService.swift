@@ -1,10 +1,21 @@
 import Foundation
 
-struct PublicationResult: Sendable {
+struct PublicationResult: Equatable, Sendable {
     let destinationID: String
     let errorDescription: String?
 
     var succeeded: Bool { errorDescription == nil }
+}
+
+struct RecordingPublicationRunner: Sendable {
+    let run: @Sendable (
+        _ session: RecordingSession,
+        _ configuration: DestinationConfiguration
+    ) -> [PublicationResult]
+
+    static let live = RecordingPublicationRunner {
+        PublicationService.publish(session: $0, configuration: $1)
+    }
 }
 
 enum PublicationService {
@@ -25,7 +36,15 @@ enum PublicationService {
         session: RecordingSession,
         configuration: DestinationConfiguration
     ) -> [PublicationResult] {
-        let destinations = configuredDestinations(configuration)
+        publish(
+            session: session,
+            destinations: configuredDestinations(configuration))
+    }
+
+    static func publish(
+        session: RecordingSession,
+        destinations: [any RecordingDestination]
+    ) -> [PublicationResult] {
         guard !destinations.isEmpty else { return [] }
 
         do {
@@ -80,18 +99,24 @@ enum PublicationService {
                 }
                 return PublicationResult(destinationID: destination.id, errorDescription: nil)
             } catch {
-                try? RecordingManifestStore.update(at: session.manifestURL) { manifest in
-                    guard let index = manifest.destinations.firstIndex(where: {
-                        $0.destinationID == destination.id
-                    }) else {
-                        return
+                var errorDescription = error.localizedDescription
+                do {
+                    try RecordingManifestStore.update(at: session.manifestURL) { manifest in
+                        guard let index = manifest.destinations.firstIndex(where: {
+                            $0.destinationID == destination.id
+                        }) else {
+                            return
+                        }
+                        manifest.destinations[index].phase = .failed
+                        manifest.destinations[index].lastError = error.localizedDescription
                     }
-                    manifest.destinations[index].phase = .failed
-                    manifest.destinations[index].lastError = error.localizedDescription
+                } catch let persistenceError {
+                    errorDescription +=
+                        " Recovery state could not be saved: \(persistenceError.localizedDescription)"
                 }
                 return PublicationResult(
                     destinationID: destination.id,
-                    errorDescription: error.localizedDescription)
+                    errorDescription: errorDescription)
             }
         }
     }
