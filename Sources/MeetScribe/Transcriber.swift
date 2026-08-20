@@ -6,6 +6,14 @@ struct TranscriptionTracks: Sendable {
 }
 
 struct Transcriber {
+    struct DetectedTranscript: Equatable, Sendable {
+        let segments: [WhisperSegment]
+        let language: String?
+    }
+
+    static let allowedLanguages: Set<String> = ["en", "es"]
+    static let fallbackLanguage = "en"
+
     let mlxWhisperPath: String
     let model: String
     private let modelResolver: @Sendable (String) -> String?
@@ -22,26 +30,57 @@ struct Transcriber {
     /// 0.4.3 overwrites the first file's JSON with the last file's output (verified),
     /// which silently destroys the per-track Me/Them attribution.
     func transcribe(mic: URL, system: URL) throws -> TranscriptionTracks {
-        TranscriptionTracks(mic: try transcribe(mic), system: try transcribe(system))
+        var micResult = try transcribe(mic, language: nil)
+        var systemResult = try transcribe(system, language: nil)
+
+        let micLanguage = Self.allowedLanguage(micResult)
+        let systemLanguage = Self.allowedLanguage(systemResult)
+
+        if Self.needsLanguageRetry(micResult), let reference = systemLanguage {
+            micResult = try transcribe(mic, language: reference)
+        }
+        if Self.needsLanguageRetry(systemResult), let reference = micLanguage {
+            systemResult = try transcribe(system, language: reference)
+        }
+
+        if Self.needsLanguageRetry(micResult) {
+            micResult = try transcribe(mic, language: Self.fallbackLanguage)
+        }
+        if Self.needsLanguageRetry(systemResult) {
+            systemResult = try transcribe(system, language: Self.fallbackLanguage)
+        }
+
+        return TranscriptionTracks(
+            mic: micResult.segments,
+            system: systemResult.segments)
     }
 
-    private func transcribe(_ audio: URL) throws -> [WhisperSegment] {
-            guard FileManager.default.fileExists(atPath: audio.path) else { return [] }
-            guard let modelPath = modelResolver(model) else {
-                throw TranscriberError.modelNotCached(model)
-            }
-            let dir = audio.deletingLastPathComponent()
-            let name = audio.deletingPathExtension().lastPathComponent
-            try Subprocess.run(mlxWhisperPath, [
-                audio.path,
-                "--model", modelPath,
-                "--output-format", "json",
-                "--output-dir", dir.path,
-                "--output-name", name,
-            ] + Self.antiHallucinationArgs)
-            let jsonURL = dir.appendingPathComponent(name + ".json")
-            defer { try? FileManager.default.removeItem(at: jsonURL) }
-            return try Self.parseSegments(Data(contentsOf: jsonURL))
+    private func transcribe(
+        _ audio: URL,
+        language: String?
+    ) throws -> DetectedTranscript {
+        guard FileManager.default.fileExists(atPath: audio.path) else {
+            return DetectedTranscript(segments: [], language: nil)
+        }
+        guard let modelPath = modelResolver(model) else {
+            throw TranscriberError.modelNotCached(model)
+        }
+        let dir = audio.deletingLastPathComponent()
+        let name = audio.deletingPathExtension().lastPathComponent
+        var arguments = [
+            audio.path,
+            "--model", modelPath,
+            "--output-format", "json",
+            "--output-dir", dir.path,
+            "--output-name", name,
+        ] + Self.antiHallucinationArgs
+        if let language {
+            arguments += ["--language", language]
+        }
+        try Subprocess.run(mlxWhisperPath, arguments)
+        let jsonURL = dir.appendingPathComponent(name + ".json")
+        defer { try? FileManager.default.removeItem(at: jsonURL) }
+        return try Self.parseTranscript(Data(contentsOf: jsonURL))
     }
 
     /// Decoder flags that stop Whisper from hallucinating on quiet tracks. The mic track
@@ -53,15 +92,56 @@ struct Transcriber {
     /// TranscriptFormatter.dropHallucinations, since Whisper's own no_speech gate misses them.
     static let antiHallucinationArgs = [
         "--condition-on-previous-text", "False",
+        "--word-timestamps", "True",
         "--hallucination-silence-threshold", "2",
         "--compression-ratio-threshold", "2.0",
         "--logprob-threshold", "-1.0",
         "--no-speech-threshold", "0.6",
     ]
 
+    static func parseTranscript(_ data: Data) throws -> DetectedTranscript {
+        struct Root: Codable {
+            let language: String?
+            let segments: [WhisperSegment]
+        }
+        let root = try JSONDecoder().decode(Root.self, from: data)
+        return DetectedTranscript(
+            segments: root.segments,
+            language: normalizedLanguage(root.language))
+    }
+
     static func parseSegments(_ data: Data) throws -> [WhisperSegment] {
-        struct Root: Codable { let segments: [WhisperSegment] }
-        return try JSONDecoder().decode(Root.self, from: data).segments
+        try parseTranscript(data).segments
+    }
+
+    private static func needsLanguageRetry(
+        _ transcript: DetectedTranscript
+    ) -> Bool {
+        !transcript.segments.isEmpty && allowedLanguage(transcript) == nil
+    }
+
+    private static func allowedLanguage(
+        _ transcript: DetectedTranscript
+    ) -> String? {
+        guard !transcript.segments.isEmpty,
+              let language = normalizedLanguage(transcript.language),
+              allowedLanguages.contains(language)
+        else {
+            return nil
+        }
+        return language
+    }
+
+    private static func normalizedLanguage(_ language: String?) -> String? {
+        guard let language else { return nil }
+        switch language.lowercased() {
+        case "en", "english":
+            return "en"
+        case "es", "spanish", "castilian":
+            return "es"
+        default:
+            return language.lowercased()
+        }
     }
 
     enum TranscriberError: Error, LocalizedError {

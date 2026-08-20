@@ -26,8 +26,87 @@ final class TranscriberInvocationTests: XCTestCase {
         XCTAssertTrue(calls.contains("CALL:\(mic.path)"))
         XCTAssertTrue(calls.contains("CALL:\(system.path)"))
         XCTAssertEqual(calls.components(separatedBy: "--condition-on-previous-text").count - 1, 2)
+        XCTAssertEqual(calls.components(separatedBy: "--word-timestamps").count - 1, 2)
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("mic.json").path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("system.json").path))
+    }
+
+    func testRetriesUnsupportedMicLanguageUsingValidSystemLanguage() throws {
+        let root = try temporaryDirectory("language-retry")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let log = root.appendingPathComponent("calls.log")
+        let executable = try makeFakeWhisper(
+            root: root,
+            log: log,
+            detectedLanguages: ["mic": "ru", "system": "en"])
+        let mic = root.appendingPathComponent("mic.m4a")
+        let system = root.appendingPathComponent("system.m4a")
+        try Data().write(to: mic)
+        try Data().write(to: system)
+
+        let tracks = try Transcriber(
+            mlxWhisperPath: executable.path,
+            model: "test/model",
+            modelResolver: { _ in "locked-test-model" })
+            .transcribe(mic: mic, system: system)
+
+        XCTAssertEqual(tracks.mic.first?.text, "mic-en")
+        XCTAssertEqual(tracks.system.first?.text, "system")
+        let calls = try String(contentsOf: log, encoding: .utf8)
+        XCTAssertEqual(calls.components(separatedBy: "CALL:").count - 1, 3)
+        XCTAssertEqual(calls.components(separatedBy: "--language\nen").count - 1, 1)
+    }
+
+    func testKeepsDifferentAllowedLanguagesWithoutRetry() throws {
+        let root = try temporaryDirectory("bilingual")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let log = root.appendingPathComponent("calls.log")
+        let executable = try makeFakeWhisper(
+            root: root,
+            log: log,
+            detectedLanguages: ["mic": "es", "system": "en"])
+        let mic = root.appendingPathComponent("mic.m4a")
+        let system = root.appendingPathComponent("system.m4a")
+        try Data().write(to: mic)
+        try Data().write(to: system)
+
+        let tracks = try Transcriber(
+            mlxWhisperPath: executable.path,
+            model: "test/model",
+            modelResolver: { _ in "locked-test-model" })
+            .transcribe(mic: mic, system: system)
+
+        XCTAssertEqual(tracks.mic.first?.text, "mic")
+        XCTAssertEqual(tracks.system.first?.text, "system")
+        let calls = try String(contentsOf: log, encoding: .utf8)
+        XCTAssertEqual(calls.components(separatedBy: "CALL:").count - 1, 2)
+        XCTAssertFalse(calls.contains("--language"))
+    }
+
+    func testFallsBackToEnglishWhenBothDetectedLanguagesAreUnsupported() throws {
+        let root = try temporaryDirectory("language-fallback")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let log = root.appendingPathComponent("calls.log")
+        let executable = try makeFakeWhisper(
+            root: root,
+            log: log,
+            detectedLanguages: ["mic": "ru", "system": "zh"])
+        let mic = root.appendingPathComponent("mic.m4a")
+        let system = root.appendingPathComponent("system.m4a")
+        try Data().write(to: mic)
+        try Data().write(to: system)
+
+        let tracks = try Transcriber(
+            mlxWhisperPath: executable.path,
+            model: "test/model",
+            modelResolver: { _ in "locked-test-model" })
+            .transcribe(mic: mic, system: system)
+
+        XCTAssertEqual(tracks.mic.first?.text, "mic-en")
+        XCTAssertEqual(tracks.system.first?.text, "system-en")
+        let calls = try String(contentsOf: log, encoding: .utf8)
+        XCTAssertEqual(calls.components(separatedBy: "CALL:").count - 1, 4)
+        XCTAssertEqual(calls.components(separatedBy: "--language\nen").count - 1, 2)
     }
 
     func testMissingTrackReturnsEmptyWithoutInvocation() throws {
@@ -71,8 +150,28 @@ final class TranscriberInvocationTests: XCTestCase {
             }
     }
 
-    private func makeFakeWhisper(root: URL, log: URL) throws -> URL {
+    private func temporaryDirectory(_ label: String) throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "meetscribe-transcriber-\(label)-\(UUID().uuidString)",
+                isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true)
+        return root
+    }
+
+    private func makeFakeWhisper(
+        root: URL,
+        log: URL,
+        detectedLanguages: [String: String] = [
+            "mic": "en",
+            "system": "en",
+        ]
+    ) throws -> URL {
         let executable = root.appendingPathComponent("fake-whisper")
+        let micLanguage = detectedLanguages["mic"] ?? "en"
+        let systemLanguage = detectedLanguages["system"] ?? "en"
         let script = """
         #!/bin/sh
         printf 'CALL:%s\\n' "$1" >> "\(log.path)"
@@ -80,14 +179,23 @@ final class TranscriberInvocationTests: XCTestCase {
         input="$1"
         output_dir=""
         output_name=""
+        language=""
         while [ "$#" -gt 0 ]; do
           case "$1" in
             --output-dir) shift; output_dir="$1" ;;
             --output-name) shift; output_name="$1" ;;
+            --language) shift; language="$1" ;;
           esac
           shift
         done
-        printf '{"segments":[{"start":0,"end":1,"text":"%s"}]}' "$output_name" > "$output_dir/$output_name.json"
+        if [ -z "$language" ]; then
+          if [ "$output_name" = "mic" ]; then language="\(micLanguage)"; else language="\(systemLanguage)"; fi
+          text="$output_name"
+        else
+          text="$output_name-$language"
+        fi
+        printf '{"language":"%s","segments":[{"start":0,"end":1,"text":"%s"}]}' \
+          "$language" "$text" > "$output_dir/$output_name.json"
         """
         try script.write(to: executable, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(
