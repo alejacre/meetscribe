@@ -15,6 +15,7 @@ final class RecordingCoordinator: ObservableObject {
     private var hotKey: HotKey?
     private var stopRequestedDuringStart = false
     private var activeTranscriptions: Set<String> = []
+    private var lastTranscriptionFailure: (key: String, message: String)?
     private var activePublications: Set<String> = []
     private let recorderFactory: () -> any AudioRecording
     private let mixer: (RecordingSession) async throws -> Void
@@ -313,7 +314,9 @@ final class RecordingCoordinator: ObservableObject {
                         userInfo: ["notePath": finalNote.path])
                     await MainActor.run { [weak self] in self?.state.lastError = processingWarning }
                 } else {
-                    await MainActor.run { [weak self] in self?.clearTranscriptionFailure() }
+                    await MainActor.run { [weak self] in
+                        self?.clearTranscriptionFailure(for: key)
+                    }
                 }
                 notifier.notify(
                     title: "Transcript ready",
@@ -343,7 +346,7 @@ final class RecordingCoordinator: ObservableObject {
                                 category: "TRANSCRIBE_FAILED",
                                 userInfo: ["notePath": s.noteURL.path])
                 await MainActor.run { [weak self] in
-                    self?.state.lastError = "Transcription failed: \(error.localizedDescription)"
+                    self?.recordTranscriptionFailure(error.localizedDescription, for: key)
                 }
             }
             await MainActor.run { [weak self] in
@@ -442,12 +445,22 @@ final class RecordingCoordinator: ObservableObject {
 
     func clearError() {
         state.lastError = nil
+        lastTranscriptionFailure = nil
         state.showPermissionHelp = false
     }
 
-    func clearTranscriptionFailure() {
-        guard state.lastError?.hasPrefix("Transcription failed:") == true else { return }
-        state.lastError = nil
+    func recordTranscriptionFailure(_ description: String, for key: String) {
+        let message = "Transcription failed: \(description)"
+        lastTranscriptionFailure = (key, message)
+        state.lastError = message
+    }
+
+    func clearTranscriptionFailure(for key: String) {
+        guard let failure = lastTranscriptionFailure, failure.key == key else { return }
+        lastTranscriptionFailure = nil
+        if state.lastError == failure.message {
+            state.lastError = nil
+        }
     }
 
     func refreshRecent() {

@@ -24,18 +24,40 @@ final class RecordingCoordinatorTests: XCTestCase {
         XCTAssertEqual(state.phase, .idle)
     }
 
-    func testSuccessfulTranscriptionClearsOnlyTranscriptionFailure() {
+    func testSuccessfulTranscriptionDoesNotClearAnotherRecordingFailure() {
         let state = AppState()
         let coordinator = RecordingCoordinator(
             state: state,
             enableSystemIntegrations: false)
 
-        state.lastError = "Transcription failed: temporary failure"
-        coordinator.clearTranscriptionFailure()
-        XCTAssertNil(state.lastError)
+        coordinator.recordTranscriptionFailure("temporary failure", for: "recording-a")
+        coordinator.clearTranscriptionFailure(for: "recording-b")
 
+        XCTAssertEqual(state.lastError, "Transcription failed: temporary failure")
+    }
+
+    func testSuccessfulRetryClearsMatchingTranscriptionFailure() {
+        let state = AppState()
+        let coordinator = RecordingCoordinator(
+            state: state,
+            enableSystemIntegrations: false)
+
+        coordinator.recordTranscriptionFailure("temporary failure", for: "recording-a")
+        coordinator.clearTranscriptionFailure(for: "recording-a")
+
+        XCTAssertNil(state.lastError)
+    }
+
+    func testSuccessfulRetryPreservesNewerUnrelatedWarning() {
+        let state = AppState()
+        let coordinator = RecordingCoordinator(
+            state: state,
+            enableSystemIntegrations: false)
+
+        coordinator.recordTranscriptionFailure("temporary failure", for: "recording-a")
         state.lastError = "Publishing failed: repository unavailable"
-        coordinator.clearTranscriptionFailure()
+        coordinator.clearTranscriptionFailure(for: "recording-a")
+
         XCTAssertEqual(state.lastError, "Publishing failed: repository unavailable")
     }
 
