@@ -17,7 +17,7 @@ struct SettingsView: View {
     }
 }
 
-private struct GeneralSettingsPane: View {
+struct GeneralSettingsPane: View {
     @State private var settings = Settings()
     @State private var outputPath = ""
     @State private var model = ""
@@ -25,6 +25,24 @@ private struct GeneralSettingsPane: View {
     @State private var hotKeyOn = true
     @State private var launchAtLogin = false
     @State private var configurationError: String?
+
+    init(
+        settings: Settings = Settings(),
+        outputPath: String = "",
+        model: String = "",
+        whisperPath: String = "",
+        hotKeyOn: Bool = true,
+        launchAtLogin: Bool = false,
+        configurationError: String? = nil
+    ) {
+        _settings = State(initialValue: settings)
+        _outputPath = State(initialValue: outputPath)
+        _model = State(initialValue: model)
+        _whisperPath = State(initialValue: whisperPath)
+        _hotKeyOn = State(initialValue: hotKeyOn)
+        _launchAtLogin = State(initialValue: launchAtLogin)
+        _configurationError = State(initialValue: configurationError)
+    }
 
     var body: some View {
         Form {

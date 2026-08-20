@@ -24,21 +24,22 @@ descendants() {
 }
 
 terminate_tree() {
-    local signal="$1"
+    local root="$1"
+    local signal="$2"
     local child
-    for child in $(descendants "$TEST_PID"); do
+    for child in $(descendants "$root"); do
         kill "-$signal" "$child" 2>/dev/null || true
     done
-    kill "-$signal" "$TEST_PID" 2>/dev/null || true
+    kill "-$signal" "$root" 2>/dev/null || true
 }
 
 (
     sleep "$TIMEOUT_SECONDS"
     if kill -0 "$TEST_PID" 2>/dev/null; then
         echo "Tests exceeded ${TIMEOUT_SECONDS}s; terminating the test process tree." >&2
-        terminate_tree TERM
+        terminate_tree "$TEST_PID" TERM
         sleep 5
-        terminate_tree KILL
+        terminate_tree "$TEST_PID" KILL
     fi
 ) &
 WATCHDOG_PID=$!
@@ -48,6 +49,6 @@ wait "$TEST_PID"
 STATUS=$?
 set -e
 
-kill "$WATCHDOG_PID" 2>/dev/null || true
+terminate_tree "$WATCHDOG_PID" TERM
 wait "$WATCHDOG_PID" 2>/dev/null || true
 exit "$STATUS"

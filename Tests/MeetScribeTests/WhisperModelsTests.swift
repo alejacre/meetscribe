@@ -2,9 +2,23 @@ import XCTest
 @testable import MeetScribe
 
 final class WhisperModelsTests: XCTestCase {
+    func testDisplayNamesAndLocalizedErrors() throws {
+        let model = try XCTUnwrap(WhisperModels.all.first)
+        XCTAssertEqual(
+            model.displayName,
+            model.id.replacingOccurrences(of: "mlx-community/", with: ""))
+        XCTAssertEqual(
+            WhisperModels.ModelError.invalidIdentifier.errorDescription,
+            "The selected model identifier is invalid.")
+        XCTAssertEqual(
+            WhisperModels.ModelError.revisionMismatch.errorDescription,
+            "The published model revision changed. Update MeetScribe before downloading it.")
+    }
+
     func testPublishedRevisionParsing() {
         let data = Data(#"{"sha":"abc123","id":"model"}"#.utf8)
         XCTAssertEqual(WhisperModels.publishedRevision(in: data), "abc123")
+        XCTAssertNil(WhisperModels.publishedRevision(in: Data("not json".utf8)))
     }
 
     func testUnknownModelIsNotAcceptedAsCached() {

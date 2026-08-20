@@ -26,6 +26,8 @@ scripts/check-coverage.sh
 swift build -c release -Xswiftc -warnings-as-errors
 ```
 
+The coverage gate requires at least 70% production line coverage.
+
 Build the application bundle:
 
 ```bash

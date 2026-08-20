@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-MINIMUM="${MINIMUM_COVERAGE:-29}"
+MINIMUM="${MINIMUM_COVERAGE:-70}"
 scripts/run-tests.sh --coverage
 
 TEST_BINARY="$(find .build -path '*debug/MeetScribePackageTests.xctest/Contents/MacOS/MeetScribePackageTests' -type f | head -1)"

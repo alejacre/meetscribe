@@ -38,6 +38,16 @@ struct SearchView: View {
     @State private var hits: [SearchHit] = []
     @State private var searched = false
 
+    init(
+        query: String = "",
+        hits: [SearchHit] = [],
+        searched: Bool = false
+    ) {
+        _query = State(initialValue: query)
+        _hits = State(initialValue: hits)
+        _searched = State(initialValue: searched)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             TextField("Search transcripts…", text: $query)

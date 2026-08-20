@@ -7,6 +7,20 @@ struct DestinationSettingsPane: View {
     @State private var gitStatus: ConnectionStatus = .idle
     @State private var sftpStatus: ConnectionStatus = .idle
 
+    init(
+        settings: Settings = Settings(),
+        configuration: DestinationConfiguration = DestinationConfiguration(),
+        loaded: Bool = false,
+        gitStatus: ConnectionStatus = .idle,
+        sftpStatus: ConnectionStatus = .idle
+    ) {
+        _settings = State(initialValue: settings)
+        _configuration = State(initialValue: configuration)
+        _loaded = State(initialValue: loaded)
+        _gitStatus = State(initialValue: gitStatus)
+        _sftpStatus = State(initialValue: sftpStatus)
+    }
+
     var body: some View {
         Form {
             Section("Git repository") {
@@ -138,7 +152,7 @@ struct DestinationSettingsPane: View {
     }
 }
 
-private enum ConnectionStatus {
+enum ConnectionStatus: Equatable {
     case idle
     case working
     case success(String)

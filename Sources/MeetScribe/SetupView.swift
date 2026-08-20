@@ -1,8 +1,12 @@
 import SwiftUI
 
 struct SetupView: View {
-    @StateObject private var model = SetupModel()
+    @StateObject private var model: SetupModel
     @Environment(\.dismiss) private var dismiss
+
+    init(model: SetupModel = SetupModel()) {
+        _model = StateObject(wrappedValue: model)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -252,7 +256,7 @@ struct SetupView: View {
 
 /// Determinate bar when a percentage is known, else a spinner, above a live,
 /// auto-scrolling monospaced log tail.
-private struct ProgressLogView: View {
+struct ProgressLogView: View {
     let log: String
     let progress: Int?
     let caption: String?

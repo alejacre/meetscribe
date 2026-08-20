@@ -16,6 +16,58 @@ final class RecordingDestinationTests: XCTestCase {
         XCTAssertFalse(paths.contains(".assets/\(session.basename)/audio.m4a"))
     }
 
+    func testExportPackageIncludesAudioAndMaterializesAtomically() throws {
+        let root = try temporaryDirectory("export-audio")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = try populatedSession(root: root.appendingPathComponent("recordings"))
+        try Data("mic".utf8).write(to: session.micURL)
+        try Data("system".utf8).write(to: session.systemURL)
+        let package = try RecordingExportPackage(session: session, includeAudio: true)
+        let paths = Set(package.files.map(\.relativePath))
+        let target = root.appendingPathComponent("target", isDirectory: true)
+
+        try package.materialize(at: target)
+        try Data("# Updated\n".utf8).write(to: session.noteURL)
+        try package.materialize(at: target)
+
+        XCTAssertTrue(paths.contains(".assets/\(session.basename)/audio.m4a"))
+        XCTAssertTrue(paths.contains(".assets/\(session.basename)/mic.m4a"))
+        XCTAssertTrue(paths.contains(".assets/\(session.basename)/system.m4a"))
+        XCTAssertEqual(
+            try String(
+                contentsOf: target.appendingPathComponent(session.noteURL.lastPathComponent),
+                encoding: .utf8),
+            "# Updated\n")
+    }
+
+    func testExportPackageRequiresTranscriptAndDestinationErrorsAreActionable() throws {
+        let root = try temporaryDirectory("missing-transcript")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = RecordingSession(root: root, start: Date(), appName: "manual")
+        try session.createFolder()
+
+        XCTAssertThrowsError(try RecordingExportPackage(session: session, includeAudio: false)) {
+            guard case DestinationError.missingTranscript = $0 else {
+                return XCTFail("unexpected error: \($0)")
+            }
+        }
+
+        let errors: [DestinationError] = [
+            .missingTranscript,
+            .invalidRepository,
+            .repositoryPathMustBeRoot,
+            .repositoryHasUnmanagedChanges("other.txt"),
+            .missingGitUpstream,
+            .invalidRelativePath,
+            .invalidSFTPHost,
+            .invalidRemotePath,
+        ]
+        XCTAssertTrue(errors.allSatisfy { !($0.errorDescription ?? "").isEmpty })
+        XCTAssertTrue(
+            DestinationError.repositoryHasUnmanagedChanges("other.txt")
+                .errorDescription?.contains("other.txt") == true)
+    }
+
     func testSFTPBatchUsesTemporaryDirectoryAndAtomicRename() throws {
         let batch = try SFTPBatch.commands(
             localDirectory: URL(fileURLWithPath: "/tmp/meeting \"one\""),
@@ -47,6 +99,50 @@ final class RecordingDestinationTests: XCTestCase {
         XCTAssertThrowsError(try SFTPDestination.validatedRemotePath("/srv/../recordings"))
     }
 
+    func testSFTPDestinationValidatesAndPublishesThroughBatchRunner() throws {
+        let root = try temporaryDirectory("sftp-publish")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = try populatedSession(root: root.appendingPathComponent("recordings"))
+        let package = try RecordingExportPackage(session: session, includeAudio: false)
+        let spy = CommandSpy()
+        let configuration = SFTPDestinationConfiguration(
+            enabled: true,
+            host: "archive",
+            remotePath: "/srv/meetings",
+            includeAudio: false)
+        let destination = SFTPDestination(
+            configuration: configuration,
+            runner: spy.runner)
+
+        try destination.validateConnection()
+        try destination.publish(package)
+
+        XCTAssertEqual(destination.id, "sftp")
+        XCTAssertEqual(destination.displayName, "SFTP over SSH")
+        XCTAssertFalse(destination.includeAudio)
+        XCTAssertEqual(destination.configurationFingerprint.count, 64)
+        let calls = spy.snapshot
+        XCTAssertEqual(calls.count, 2)
+        XCTAssertEqual(calls[0].executable, "/usr/bin/sftp")
+        XCTAssertEqual(calls[0].arguments.last, "archive")
+        XCTAssertEqual(calls[0].timeout, 30)
+        XCTAssertTrue(calls[0].stdin?.contains("cd \"/srv/meetings\"") == true)
+        XCTAssertEqual(calls[1].timeout, 600)
+        XCTAssertTrue(calls[1].stdin?.contains("put -R") == true)
+        XCTAssertTrue(calls[1].stdin?.contains("rename") == true)
+        XCTAssertNotNil(calls[1].environment)
+    }
+
+    func testSFTPSuccessfulValidationNormalizesRemotePaths() throws {
+        XCTAssertNoThrow(try SFTPDestination.validateHost("archive.example"))
+        XCTAssertEqual(
+            try SFTPDestination.validatedRemotePath("/srv/meetings/"),
+            "/srv/meetings")
+        XCTAssertEqual(
+            try SFTPDestination.validatedRemotePath("team/meetings/"),
+            "team/meetings")
+    }
+
     func testGitRelativePathValidation() throws {
         XCTAssertEqual(
             try GitRepositoryDestination.validatedRelativePath("meetings/team/"),
@@ -75,6 +171,40 @@ final class RecordingDestinationTests: XCTestCase {
                 return XCTFail("unexpected error: \(error)")
             }
         }
+    }
+
+    func testGitValidationRejectsMissingRepositoryAndNestedPath() throws {
+        let root = try temporaryDirectory("git-invalid")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let missing = GitRepositoryDestination(configuration: GitDestinationConfiguration(
+            enabled: true,
+            repositoryPath: root.appendingPathComponent("missing").path,
+            relativePath: "",
+            includeAudio: false))
+        XCTAssertThrowsError(try missing.validateConnection()) {
+            guard case DestinationError.invalidRepository = $0 else {
+                return XCTFail("unexpected error: \($0)")
+            }
+        }
+
+        let nested = root.appendingPathComponent("repository/nested", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        let spy = CommandSpy(result: root.appendingPathComponent("repository").path)
+        let destination = GitRepositoryDestination(
+            configuration: GitDestinationConfiguration(
+                enabled: true,
+                repositoryPath: nested.path,
+                relativePath: "",
+                includeAudio: false),
+            runner: spy.runner)
+        XCTAssertThrowsError(try destination.validateConnection()) {
+            guard case DestinationError.repositoryPathMustBeRoot = $0 else {
+                return XCTFail("unexpected error: \($0)")
+            }
+        }
+        XCTAssertEqual(destination.id, "git")
+        XCTAssertEqual(destination.displayName, "Git repository")
+        XCTAssertEqual(destination.configurationFingerprint.count, 64)
     }
 
     func testGitDestinationCommitsAndPushesToConfiguredUpstream() throws {
@@ -173,5 +303,41 @@ final class RecordingDestinationTests: XCTestCase {
     @discardableResult
     private func runGit(_ arguments: [String]) throws -> String {
         try Subprocess.run("/usr/bin/git", arguments, timeout: 30)
+    }
+
+    private final class CommandSpy: @unchecked Sendable {
+        struct Call {
+            let executable: String
+            let arguments: [String]
+            let stdin: String?
+            let timeout: TimeInterval
+            let environment: [String: String]?
+        }
+
+        private let lock = NSLock()
+        private var calls: [Call] = []
+        private let result: String
+
+        init(result: String = "") {
+            self.result = result
+        }
+
+        var runner: DestinationCommandRunner {
+            DestinationCommandRunner { [self] executable, arguments, stdin, timeout, environment in
+                lock.withLock {
+                    calls.append(Call(
+                        executable: executable,
+                        arguments: arguments,
+                        stdin: stdin,
+                        timeout: timeout,
+                        environment: environment))
+                }
+                return result
+            }
+        }
+
+        var snapshot: [Call] {
+            lock.withLock { calls }
+        }
     }
 }

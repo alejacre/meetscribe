@@ -7,6 +7,20 @@ struct TriggerSettingsPane: View {
     @State private var customName = ""
     @State private var error: String?
 
+    init(
+        settings: Settings = Settings(),
+        rules: [MeetingRule] = [],
+        customBundleID: String = "",
+        customName: String = "",
+        error: String? = nil
+    ) {
+        _settings = State(initialValue: settings)
+        _rules = State(initialValue: rules)
+        _customBundleID = State(initialValue: customBundleID)
+        _customName = State(initialValue: customName)
+        _error = State(initialValue: error)
+    }
+
     var body: some View {
         Form {
             Section("Meeting applications") {

@@ -28,6 +28,37 @@ enum StepPhase: Equatable {
 
 enum PermState: Equatable { case unknown, granted, denied }
 
+struct SetupModelDependencies: Sendable {
+    let findTool: @Sendable (String) -> String?
+    let isExecutable: @Sendable (String) -> Bool
+    let verifyPublishedRevision: @Sendable (WhisperModel) async throws -> Void
+    let modelCached: @Sendable (String) -> Bool
+    let screenRecordingGranted: @Sendable () -> Bool
+    let micStatus: @Sendable () -> AVAuthorizationStatus
+    let notificationStatus: @Sendable () async -> UNAuthorizationStatus
+    let requestScreenRecording: @Sendable () -> Bool
+    let requestMic: @Sendable () async -> Bool
+    let requestNotifications: @Sendable () async -> Bool
+    let permissionRefreshDelay: @Sendable () async -> Void
+    let managedToolRoot: URL
+    let managedBinRoot: URL
+
+    static let live = SetupModelDependencies(
+        findTool: ToolFinder.findTool,
+        isExecutable: { FileManager.default.isExecutableFile(atPath: $0) },
+        verifyPublishedRevision: WhisperModels.verifyPublishedRevision,
+        modelCached: { WhisperModels.isCached($0) },
+        screenRecordingGranted: { Permissions.screenRecordingGranted },
+        micStatus: { Permissions.micStatus },
+        notificationStatus: { await Permissions.notificationStatus() },
+        requestScreenRecording: Permissions.requestScreenRecording,
+        requestMic: Permissions.requestMic,
+        requestNotifications: Permissions.requestNotifications,
+        permissionRefreshDelay: { try? await Task.sleep(for: .milliseconds(500)) },
+        managedToolRoot: SetupModel.managedToolRoot,
+        managedBinRoot: SetupModel.managedBinRoot)
+}
+
 @MainActor
 final class SetupModel: ObservableObject {
     @Published var step: SetupStep = .welcome
@@ -54,7 +85,8 @@ final class SetupModel: ObservableObject {
     @Published var claudeFound: Bool?        // nil = not yet checked
     @Published var claudeEnabled: Bool
 
-    private var settings = Settings()
+    private var settings: Settings
+    private let dependencies: SetupModelDependencies
     private var workTask: Task<Void, Never>?
 
     nonisolated static var managedToolRoot: URL {
@@ -74,15 +106,19 @@ final class SetupModel: ObservableObject {
         return environment
     }
 
-    init() {
-        let s = Settings()
-        outputPath = s.outputFolder.path
+    init(
+        settings: Settings = Settings(),
+        dependencies: SetupModelDependencies = .live
+    ) {
+        self.settings = settings
+        self.dependencies = dependencies
+        outputPath = settings.outputFolder.path
         try? FileManager.default.createDirectory(
-            at: s.outputFolder,
+            at: settings.outputFolder,
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: NSNumber(value: Int16(0o700))])
-        claudeEnabled = s.claudeCleanupEnabled
-        selectedModel = s.whisperModel
+        claudeEnabled = settings.claudeCleanupEnabled
+        selectedModel = settings.whisperModel
     }
 
     func selectModel(_ m: String) {
@@ -120,16 +156,18 @@ final class SetupModel: ObservableObject {
     func checkEngine() async {
         enginePhase = .checking
         let configuredPath = (settings.mlxWhisperPath as NSString).expandingTildeInPath
+        let dependencies = dependencies
         let result = await Task.detached(priority: .utility) { () -> String? in
-            let uv = ToolFinder.findTool("uv")
-            if FileManager.default.isExecutableFile(atPath: configuredPath) {
+            let uv = dependencies.findTool("uv")
+            if dependencies.isExecutable(configuredPath) {
                 return configuredPath
             }
-            let managedPath = Self.managedBinRoot.appendingPathComponent("mlx_whisper").path
-            if FileManager.default.isExecutableFile(atPath: managedPath) {
+            let managedPath = dependencies.managedBinRoot
+                .appendingPathComponent("mlx_whisper").path
+            if dependencies.isExecutable(managedPath) {
                 return managedPath
             }
-            guard let path = ToolFinder.findTool("mlx_whisper") else { return nil }
+            guard let path = dependencies.findTool("mlx_whisper") else { return nil }
             guard let uv else { return path }
             let list = try? Subprocess.run(uv, ["tool", "list"], timeout: 30)
             return Self.isPinnedEngineList(list ?? "") ? path : nil
@@ -150,31 +188,32 @@ final class SetupModel: ObservableObject {
         workTask = Task { [weak self] in
             guard let self else { return }
             do {
+                let dependencies = self.dependencies
                 let uv = await Task.detached(priority: .utility) {
-                    ToolFinder.findTool("uv")
+                    dependencies.findTool("uv")
                 }.value
                 if uv == nil {
                     self.enginePhase = .failed(
                         "uv is required. Install it with Homebrew or the verified package from astral.sh.")
                     return
                 }
-                guard let uvPath = uv, FileManager.default.isExecutableFile(atPath: uvPath) else {
+                guard let uvPath = uv, dependencies.isExecutable(uvPath) else {
                     self.enginePhase = .failed("Could not install uv."); return
                 }
                 try FileManager.default.createDirectory(
-                    at: Self.managedToolRoot,
+                    at: dependencies.managedToolRoot,
                     withIntermediateDirectories: true)
                 try FileManager.default.createDirectory(
-                    at: Self.managedBinRoot,
+                    at: dependencies.managedBinRoot,
                     withIntermediateDirectories: true)
                 try await self.runLogged(
                     uvPath,
                     ["tool", "install", "--force",
                      "mlx-whisper==\(WhisperModels.mlxWhisperVersion)"],
                     into: \.engineLog,
-                    environment: Self.managedToolEnvironment)
+                    environment: self.managedToolEnvironment)
                 if Task.isCancelled { return }
-                self.settings.mlxWhisperPath = Self.managedBinRoot
+                self.settings.mlxWhisperPath = dependencies.managedBinRoot
                     .appendingPathComponent("mlx_whisper").path
                 await self.checkEngine()
                 if case .done = self.enginePhase {} else {
@@ -191,7 +230,7 @@ final class SetupModel: ObservableObject {
     // MARK: Model
 
     func checkModel() {
-        modelPhase = Self.modelCached(selectedModel) ? .done : .missing
+        modelPhase = dependencies.modelCached(selectedModel) ? .done : .missing
     }
 
     /// Warms the HuggingFace cache by transcribing a silent clip. mlx_whisper/HF print
@@ -211,7 +250,7 @@ final class SetupModel: ObservableObject {
                     self.modelPhase = .failed("Select a supported model.")
                     return
                 }
-                try await WhisperModels.verifyPublishedRevision(for: lockedModel)
+                try await self.dependencies.verifyPublishedRevision(lockedModel)
                 try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
                 let wav = tmp.appendingPathComponent("silent.wav")
                 try SilentWav.write(to: wav)
@@ -220,7 +259,7 @@ final class SetupModel: ObservableObject {
                     "--output-dir", tmp.path, "--output-name", "silent",
                 ], into: \.modelLog, progress: \.modelProgress)
                 if Task.isCancelled { return }
-                self.modelPhase = Self.modelCached(model) ? .done
+                self.modelPhase = self.dependencies.modelCached(model) ? .done
                     : .failed("Download finished but model is not cached.")
             } catch is CancellationError {
                 self.modelPhase = .missing
@@ -246,14 +285,14 @@ final class SetupModel: ObservableObject {
     // MARK: Permissions
 
     func refreshPermissions() async {
-        screenPerm = Permissions.screenRecordingGranted ? .granted
+        screenPerm = dependencies.screenRecordingGranted() ? .granted
             : settings.screenPermissionRequested ? .denied : .unknown
-        switch Permissions.micStatus {
+        switch dependencies.micStatus() {
         case .authorized: micPerm = .granted
         case .notDetermined: micPerm = .unknown
         default: micPerm = .denied
         }
-        switch await Permissions.notificationStatus() {
+        switch await dependencies.notificationStatus() {
         case .authorized, .provisional, .ephemeral: notifPerm = .granted
         case .notDetermined: notifPerm = .unknown
         default: notifPerm = .denied
@@ -262,14 +301,16 @@ final class SetupModel: ObservableObject {
 
     func requestScreen() {
         settings.screenPermissionRequested = true
-        Permissions.requestScreenRecording()
+        _ = dependencies.requestScreenRecording()
         Task {
-            try? await Task.sleep(for: .milliseconds(500))
+            await dependencies.permissionRefreshDelay()
             await refreshPermissions()
         }
     }
-    func requestMic() { Task { _ = await Permissions.requestMic(); await refreshPermissions() } }
-    func requestNotifications() { Task { _ = await Permissions.requestNotifications(); await refreshPermissions() } }
+    func requestMic() { Task { _ = await dependencies.requestMic(); await refreshPermissions() } }
+    func requestNotifications() {
+        Task { _ = await dependencies.requestNotifications(); await refreshPermissions() }
+    }
 
     // MARK: Output + cleanup
 
@@ -283,8 +324,9 @@ final class SetupModel: ObservableObject {
     }
 
     func checkClaude() async {
+        let dependencies = dependencies
         claudeFound = await Task.detached(priority: .utility) {
-            ToolFinder.findTool("claude") != nil
+            dependencies.findTool("claude") != nil
         }.value
     }
 
@@ -298,6 +340,13 @@ final class SetupModel: ObservableObject {
         return screenPerm == .granted
             && micPerm == .granted
             && FileManager.default.isWritableFile(atPath: outputPath)
+    }
+
+    private var managedToolEnvironment: [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        environment["UV_TOOL_DIR"] = dependencies.managedToolRoot.path
+        environment["UV_TOOL_BIN_DIR"] = dependencies.managedBinRoot.path
+        return environment
     }
 
     // MARK: Streaming helper

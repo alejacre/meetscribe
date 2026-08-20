@@ -6,6 +6,18 @@ struct AgentSettingsPane: View {
     @State private var argumentsText = ""
     @State private var loaded = false
 
+    init(
+        settings: Settings = Settings(),
+        configuration: AgentConfiguration = .disabled,
+        argumentsText: String = "",
+        loaded: Bool = false
+    ) {
+        _settings = State(initialValue: settings)
+        _configuration = State(initialValue: configuration)
+        _argumentsText = State(initialValue: argumentsText)
+        _loaded = State(initialValue: loaded)
+    }
+
     var body: some View {
         Form {
             Section("Transcript processing") {

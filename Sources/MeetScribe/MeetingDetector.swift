@@ -22,12 +22,23 @@ final class MeetingDetector {
     private var timer: Timer?
     private var current: Set<DetectedMeeting> = []
     private let appDefinitions: () -> [String: String]
+    private let activeApplications: @MainActor ([String: String]) -> [DetectedMeeting]
+    private let isZoomMeetingActive: @MainActor () -> Bool
 
-    init(appDefinitions: @escaping () -> [String: String] = { MeetingDetector.knownApps }) {
+    init(
+        appDefinitions: @escaping () -> [String: String] = { MeetingDetector.knownApps },
+        activeApplications: @escaping @MainActor ([String: String]) -> [DetectedMeeting] =
+            MeetingDetector.appsUsingMicrophone,
+        isZoomMeetingActive: @escaping @MainActor () -> Bool =
+            MeetingDetector.zoomMeetingHelperRunning
+    ) {
         self.appDefinitions = appDefinitions
+        self.activeApplications = activeApplications
+        self.isZoomMeetingActive = isZoomMeetingActive
     }
 
     func startPolling(interval: TimeInterval = 1.5) {
+        stopPolling()
         let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.poll() }
         }
@@ -35,12 +46,17 @@ final class MeetingDetector {
         timer = t
     }
 
-    private func poll() {
+    func stopPolling() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    func poll() {
         // Zoom holds the microphone after the meeting ends; its CptHost helper
         // only runs during an actual meeting, so treat idle Zoom as no-meeting
         // instead of letting it mask Teams/Chime also on the mic.
-        let active = Set(Self.appsUsingMicrophone(knownApps: appDefinitions()).filter {
-            $0.appName != "zoom" || Self.zoomMeetingHelperRunning()
+        let active = Set(activeApplications(appDefinitions()).filter {
+            $0.appName != "zoom" || isZoomMeetingActive()
         })
         let changes = Self.changes(previous: current, active: active)
         if !changes.started.isEmpty || !changes.ended.isEmpty {

@@ -5,18 +5,29 @@ struct MeetScribeApp: App {
     @StateObject private var state: AppState
     @StateObject private var coordinator: RecordingCoordinator
     @Environment(\.openWindow) private var openWindow
-    private let firstRun = !Settings().setupCompleted
+    private let firstRun: Bool
 
     init() {
         let s = AppState()
         _state = StateObject(wrappedValue: s)
         _coordinator = StateObject(wrappedValue: RecordingCoordinator(state: s))
+        firstRun = !Settings().setupCompleted
         // LSUIElement apps can fall back to the generic icon in windows and
         // dialogs; pin the bundled icon explicitly.
         if let icns = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
            let icon = NSImage(contentsOf: icns) {
             NSApplication.shared.applicationIconImage = icon
         }
+    }
+
+    init(
+        state: AppState,
+        coordinator: RecordingCoordinator,
+        firstRun: Bool = false
+    ) {
+        _state = StateObject(wrappedValue: state)
+        _coordinator = StateObject(wrappedValue: coordinator)
+        self.firstRun = firstRun
     }
 
     var body: some Scene {
