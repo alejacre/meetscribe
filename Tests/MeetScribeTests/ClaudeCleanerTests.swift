@@ -14,6 +14,13 @@ final class ClaudeCleanerTests: XCTestCase {
         XCTAssertEqual(slug, "q3-budget-review")
     }
 
+    func testExtractTopicRejectsUnboundedFilenames() {
+        XCTAssertNil(ClaudeCleaner.extractTopic(
+            "<!-- topic: one-two-three-four -->\nbody").0)
+        XCTAssertNil(ClaudeCleaner.extractTopic(
+            "<!-- topic: \(String(repeating: "a", count: 65)) -->\nbody").0)
+    }
+
     func testIsLoginFailure() {
         XCTAssertTrue(ClaudeCleaner.isLoginFailure("Not logged in · Please run /login"))
         XCTAssertTrue(ClaudeCleaner.isLoginFailure("Please run /login"))
@@ -45,6 +52,19 @@ final class ClaudeCleanerTests: XCTestCase {
         let original = transcript("[00:00:01] **Me:** Hello.")
         let cleaned = cleanedTranscript("[00:00:01] **Me:** Hello.")
             .replacingOccurrences(of: "model=test", with: "model=other")
+        XCTAssertFalse(ClaudeCleaner.structurallyValid(original: original, cleaned: cleaned))
+    }
+
+    func testStructuralValidationRejectsReplacedTranscriptText() {
+        let original = transcript("""
+        [00:00:01] **Me:** We approved the launch for Friday.
+        [00:00:02] **Them:** I will prepare the customer migration.
+        """)
+        let cleaned = cleanedTranscript("""
+        [00:00:01] **Me:** Completely unrelated invented sentence.
+        [00:00:02] **Them:** Another fabricated response appears here.
+        """)
+
         XCTAssertFalse(ClaudeCleaner.structurallyValid(original: original, cleaned: cleaned))
     }
 
@@ -100,6 +120,33 @@ final class ClaudeCleanerTests: XCTestCase {
         XCTAssertTrue(args.contains("--strict-mcp-config"))
         XCTAssertTrue(args.contains("--no-session-persistence"))
         XCTAssertEqual(try String(contentsOf: envLog, encoding: .utf8), "unset")
+    }
+
+    func testCleanRejectsStructurallyValidOutputWithoutTopic() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meetscribe-claude-topic-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let executable = root.appendingPathComponent("fake-claude")
+        let script = """
+        #!/bin/sh
+        cat <<'MEETSCRIBE_OUTPUT'
+        \(cleanedTranscript("[00:00:01] **Me:** Hello."))
+        MEETSCRIBE_OUTPUT
+        """
+        try script.write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: Int16(0o700))],
+            ofItemAtPath: executable.path)
+
+        XCTAssertThrowsError(try ClaudeCleaner.clean(
+            transcript("[00:00:01] **Me:** um hello"),
+            binary: executable.path)
+        ) { error in
+            guard case ClaudeCleaner.CleanError.missingTopic = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
     }
 
     private func transcript(_ body: String) -> String {

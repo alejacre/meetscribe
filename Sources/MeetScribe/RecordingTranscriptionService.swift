@@ -37,11 +37,20 @@ struct RecordingTranscriptionRunner: Sendable {
     }
 }
 
+struct RecordingFinalizerRunner: Sendable {
+    let move: @Sendable (_ session: RecordingSession, _ topicSlug: String) throws -> URL
+
+    static let live = RecordingFinalizerRunner {
+        try RecordingFinalizer.move($0, toTopicSlug: $1)
+    }
+}
+
 enum RecordingTranscriptionService {
     static func run(
         session: RecordingSession,
         configuration: RecordingTranscriptionConfiguration,
-        trackTranscriber: RecordingTrackTranscriber = .live
+        trackTranscriber: RecordingTrackTranscriber = .live,
+        finalizer: RecordingFinalizerRunner = .live
     ) throws -> RecordingTranscriptionResult {
         try session.ensureManifest()
         try RecordingManifestStore.update(at: session.manifestURL) { manifest in
@@ -60,7 +69,7 @@ enum RecordingTranscriptionService {
         let duration = max(mic.last?.end ?? 0, system.last?.end ?? 0)
         let appLabel = session.appName
             ?? String(session.basename.dropFirst(session.datePart.count + 1))
-        var markdown = TranscriptFormatter.format(
+        let markdown = TranscriptFormatter.format(
             mic: mic,
             system: system,
             header: .init(
@@ -83,20 +92,19 @@ enum RecordingTranscriptionService {
         {
             do {
                 if let result = try processor.process(markdown) {
-                    processorID = processor.id
-                    markdown = TranscriptFormatter.markProcessed(
+                    let processedMarkdown = TranscriptFormatter.markProcessed(
                         result.markdown,
                         by: processor.id)
-                    try markdown.write(
-                        to: session.transcriptMD,
+                    finalNote = try finalizer.move(session, result.topicSlug)
+                    try processedMarkdown.write(
+                        to: finalNote,
                         atomically: true,
                         encoding: .utf8)
-                    try session.secureFile(session.transcriptMD)
-                    if let slug = result.topicSlug {
-                        finalNote = try RecordingFinalizer.move(
-                            session,
-                            toTopicSlug: slug)
-                    }
+                    let processedSession = RecordingSession(
+                        existingNote: finalNote,
+                        start: session.start)
+                    try processedSession.secureFile(finalNote)
+                    processorID = processor.id
                 }
             } catch {
                 processingWarning = error.localizedDescription

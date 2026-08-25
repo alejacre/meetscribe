@@ -53,9 +53,14 @@ and performs matching away from the main actor with cancellation between lines.
 
 ### Transcript Agent
 
-`TranscriptProcessing` accepts Markdown and returns processed Markdown plus an optional topic slug. The built-in Claude Code and custom-command implementations share structural validation.
+`TranscriptProcessing` accepts Markdown and returns processed Markdown plus a
+required, bounded topic slug. The built-in Claude Code and custom-command
+implementations share validation for structure, turn identity, and bounded
+source-token preservation.
 
-Agents run after raw local Markdown is written. Failure leaves the raw transcript intact.
+Agents run after raw local Markdown is written. Topic renaming completes before
+processed Markdown replaces the raw note, so any processing or rename failure
+leaves a raw transcript intact.
 
 ### Destination
 

@@ -5,16 +5,19 @@ enum ClaudeCleaner {
 
     struct Result {
         let markdown: String
-        let topicSlug: String?
+        let topicSlug: String
     }
 
     enum CleanError: Error, LocalizedError {
         case notLoggedIn
+        case missingTopic
         case invalidOutput
         var errorDescription: String? {
             switch self {
             case .notLoggedIn:
                 "claude CLI is not logged in  -  run `claude /login`"
+            case .missingTopic:
+                "Claude returned a transcript without the required topic name"
             case .invalidOutput:
                 "Claude returned an incomplete or structurally unsafe transcript"
             }
@@ -38,6 +41,9 @@ enum ClaudeCleaner {
             environment: Subprocess.restrictedEnvironment)
         if isLoginFailure(raw) { throw CleanError.notLoggedIn }
         let (slug, body) = extractTopic(raw)
+        guard let slug else {
+            throw CleanError.missingTopic
+        }
         guard structurallyValid(original: markdown, cleaned: body) else {
             throw CleanError.invalidOutput
         }

@@ -2,7 +2,7 @@ import Foundation
 
 struct TranscriptProcessingResult: Sendable {
     let markdown: String
-    let topicSlug: String?
+    let topicSlug: String
 }
 
 protocol TranscriptProcessing: Sendable {
@@ -36,7 +36,11 @@ enum TranscriptProcessorSupport {
                 .trimmingCharacters(in: .whitespaces))
         lines.removeFirst()
         let body = lines.joined(separator: "\n").trimmingCharacters(in: .newlines) + "\n"
-        return (slug.isEmpty ? nil : String(slug), body)
+        let words = slug.split(separator: "-", omittingEmptySubsequences: true)
+        guard !slug.isEmpty, (1...3).contains(words.count), slug.utf8.count <= 64 else {
+            return (nil, body)
+        }
+        return (String(slug), body)
     }
 
     static func structurallyValid(original: String, processed: String) -> Bool {
@@ -48,7 +52,25 @@ enum TranscriptProcessorSupport {
         else {
             return false
         }
-        return turnMarkers(in: original) == turnMarkers(in: processed)
+        let originalTurns = transcriptTurns(in: original)
+        let processedTurns = transcriptTurns(in: processed)
+        guard originalTurns.map(\.marker) == processedTurns.map(\.marker) else {
+            return false
+        }
+
+        let originalTokens = originalTurns.flatMap(\.tokens)
+        let processedTokens = processedTurns.flatMap(\.tokens)
+        guard !originalTokens.isEmpty else { return processedTokens.isEmpty }
+        guard processedTokens.count <= Int(Double(originalTokens.count) * 1.5) + 8 else {
+            return false
+        }
+        guard tokenOverlap(originalTokens, processedTokens) * 2 >= originalTokens.count else {
+            return false
+        }
+        return zip(originalTurns, processedTurns).allSatisfy { originalTurn, processedTurn in
+            originalTurn.tokens.isEmpty
+                || tokenOverlap(originalTurn.tokens, processedTurn.tokens) > 0
+        }
     }
 
     private static func frontmatter(in markdown: String) -> String? {
@@ -66,13 +88,53 @@ enum TranscriptProcessorSupport {
             .first { $0.hasPrefix("<!-- meetscribe:") && $0.hasSuffix("-->") }
     }
 
-    private static func turnMarkers(in markdown: String) -> [String] {
+    private struct TranscriptTurn {
+        let marker: String
+        let tokens: [String]
+    }
+
+    private static func transcriptTurns(in markdown: String) -> [TranscriptTurn] {
         let pattern = #"\[\d{2}:\d{2}:\d{2}\] \*\*(?:Me|Them):\*\*"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-        let range = NSRange(markdown.startIndex..., in: markdown)
-        return regex.matches(in: markdown, range: range).compactMap {
-            Range($0.range, in: markdown).map { String(markdown[$0]) }
+        let contentEnd = metadataCommentRange(in: markdown)?.lowerBound ?? markdown.endIndex
+        let content = String(markdown[..<contentEnd])
+        let range = NSRange(content.startIndex..., in: content)
+        let matches = regex.matches(in: content, range: range)
+        return matches.enumerated().compactMap { index, match in
+            guard let markerRange = Range(match.range, in: content) else { return nil }
+            let textStart = markerRange.upperBound
+            let textEnd: String.Index
+            if index + 1 < matches.count,
+               let nextRange = Range(matches[index + 1].range, in: content)
+            {
+                textEnd = nextRange.lowerBound
+            } else {
+                textEnd = content.endIndex
+            }
+            return TranscriptTurn(
+                marker: String(content[markerRange]),
+                tokens: tokens(in: String(content[textStart..<textEnd])))
         }
+    }
+
+    private static func metadataCommentRange(in markdown: String) -> Range<String.Index>? {
+        markdown.range(of: "<!-- meetscribe:")
+    }
+
+    private static func tokens(in text: String) -> [String] {
+        text.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+    }
+
+    private static func tokenOverlap(_ left: [String], _ right: [String]) -> Int {
+        var remaining = Dictionary(right.map { ($0, 1) }, uniquingKeysWith: +)
+        var overlap = 0
+        for token in left where remaining[token, default: 0] > 0 {
+            overlap += 1
+            remaining[token, default: 0] -= 1
+        }
+        return overlap
     }
 }
 
@@ -93,12 +155,15 @@ struct CommandTranscriptProcessor: TranscriptProcessing {
 
     enum ProcessorError: Error, LocalizedError {
         case missingExecutable
+        case missingTopic
         case invalidOutput
 
         var errorDescription: String? {
             switch self {
             case .missingExecutable:
                 "Choose an executable for the custom transcript agent."
+            case .missingTopic:
+                "The custom transcript agent returned a transcript without the required topic name."
             case .invalidOutput:
                 "The custom transcript agent returned incomplete or structurally unsafe Markdown."
             }
@@ -134,6 +199,9 @@ struct CommandTranscriptProcessor: TranscriptProcessing {
                 ? ProcessInfo.processInfo.environment
                 : Subprocess.restrictedEnvironment)
         let (slug, body) = TranscriptProcessorSupport.extractTopic(output)
+        guard let slug else {
+            throw ProcessorError.missingTopic
+        }
         guard TranscriptProcessorSupport.structurallyValid(original: markdown, processed: body) else {
             throw ProcessorError.invalidOutput
         }

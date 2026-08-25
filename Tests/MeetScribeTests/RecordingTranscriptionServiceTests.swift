@@ -85,6 +85,176 @@ final class RecordingTranscriptionServiceTests: XCTestCase {
         XCTAssertNil(manifest.transcript?.processorID)
     }
 
+    func testRunKeepsProvisionalNameAndWarnsWhenAgentOmitsTopic() throws {
+        let root = try temporaryDirectory("transcription-agent-missing-topic")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executable = root.appendingPathComponent("missing-topic-agent")
+        let script = """
+            #!/bin/sh
+            /usr/bin/awk '
+                {
+                    print
+                    if ($0 == "---") {
+                        frontmatterMarkers++
+                        if (frontmatterMarkers == 2) {
+                            print ""
+                            print "## Summary"
+                            print ""
+                            print "Greeting."
+                        }
+                    }
+                }
+            '
+            """
+        try script.write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: Int16(0o700))],
+            ofItemAtPath: executable.path)
+        let session = RecordingSession(
+            root: root,
+            start: Date(timeIntervalSince1970: 1_777_003_200),
+            appName: "zoom")
+        try session.createFolder()
+        let configuration = RecordingTranscriptionConfiguration(
+            mlxWhisperPath: "/unused",
+            whisperModel: "test/model",
+            agentConfiguration: AgentConfiguration(
+                provider: .customCommand,
+                customExecutable: executable.path,
+                customArguments: [],
+                customPrompt: "",
+                inheritEnvironment: false))
+        let tracks = RecordingTrackTranscriber { _, _ in
+            TranscriptionTracks(
+                mic: [WhisperSegment(start: 0, end: 1, text: "Raw words")],
+                system: [])
+        }
+
+        let result = try RecordingTranscriptionService.run(
+            session: session,
+            configuration: configuration,
+            trackTranscriber: tracks)
+
+        let markdown = try String(
+            contentsOf: result.finalSession.noteURL,
+            encoding: .utf8)
+        let manifest = try RecordingManifestStore.load(
+            from: result.finalSession.manifestURL)
+        XCTAssertEqual(result.finalSession.basename, session.basename)
+        XCTAssertEqual(
+            result.processingWarning,
+            CommandTranscriptProcessor.ProcessorError.missingTopic.errorDescription)
+        XCTAssertTrue(markdown.contains("Raw words"))
+        XCTAssertFalse(markdown.contains("## Summary"))
+        XCTAssertNil(manifest.transcript?.processorID)
+    }
+
+    func testRunKeepsRawTranscriptWhenFinalRenameFails() throws {
+        let root = try temporaryDirectory("transcription-agent-rename-failure")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executable = root.appendingPathComponent("valid-agent")
+        try makeValidAgent(at: executable)
+        let session = RecordingSession(
+            root: root,
+            start: Date(timeIntervalSince1970: 1_777_003_200),
+            appName: "zoom")
+        try session.createFolder()
+        let configuration = agentConfiguration(executable: executable)
+        let tracks = testTracks()
+        let finalizer = RecordingFinalizerRunner { _, _ in
+            throw TestError.renameFailed
+        }
+
+        let result = try RecordingTranscriptionService.run(
+            session: session,
+            configuration: configuration,
+            trackTranscriber: tracks,
+            finalizer: finalizer)
+
+        let markdown = try String(contentsOf: session.noteURL, encoding: .utf8)
+        let manifest = try RecordingManifestStore.load(from: session.manifestURL)
+        XCTAssertEqual(result.finalSession.basename, session.basename)
+        XCTAssertEqual(result.processingWarning, TestError.renameFailed.errorDescription)
+        XCTAssertTrue(markdown.contains("Raw words"))
+        XCTAssertFalse(markdown.contains("## Summary"))
+        XCTAssertNil(result.processorID)
+        XCTAssertNil(manifest.transcript?.processorID)
+    }
+
+    func testRunRenamesBeforeCommittingProcessedTranscript() throws {
+        let root = try temporaryDirectory("transcription-agent-success")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executable = root.appendingPathComponent("valid-agent")
+        try makeValidAgent(at: executable)
+        let session = RecordingSession(
+            root: root,
+            start: Date(timeIntervalSince1970: 1_777_003_200),
+            appName: "zoom")
+        try session.createFolder()
+
+        let result = try RecordingTranscriptionService.run(
+            session: session,
+            configuration: agentConfiguration(executable: executable),
+            trackTranscriber: testTracks())
+
+        let markdown = try String(
+            contentsOf: result.finalSession.noteURL,
+            encoding: .utf8)
+        let manifest = try RecordingManifestStore.load(
+            from: result.finalSession.manifestURL)
+        XCTAssertEqual(result.finalSession.basename, "2026-04-24-planning")
+        XCTAssertTrue(markdown.contains("## Summary"))
+        XCTAssertTrue(markdown.contains("cleaned=true, processor=custom-command"))
+        XCTAssertEqual(result.processorID, "custom-command")
+        XCTAssertEqual(manifest.transcript?.processorID, "custom-command")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: session.noteURL.path))
+    }
+
+    private func agentConfiguration(executable: URL) -> RecordingTranscriptionConfiguration {
+        RecordingTranscriptionConfiguration(
+            mlxWhisperPath: "/unused",
+            whisperModel: "test/model",
+            agentConfiguration: AgentConfiguration(
+                provider: .customCommand,
+                customExecutable: executable.path,
+                customArguments: [],
+                customPrompt: "",
+                inheritEnvironment: false))
+    }
+
+    private func testTracks() -> RecordingTrackTranscriber {
+        RecordingTrackTranscriber { _, _ in
+            TranscriptionTracks(
+                mic: [WhisperSegment(start: 0, end: 1, text: "Raw words")],
+                system: [])
+        }
+    }
+
+    private func makeValidAgent(at executable: URL) throws {
+        let script = """
+            #!/bin/sh
+            /usr/bin/awk '
+                BEGIN { print "<!-- topic: planning -->" }
+                {
+                    print
+                    if ($0 == "---") {
+                        frontmatterMarkers++
+                        if (frontmatterMarkers == 2) {
+                            print ""
+                            print "## Summary"
+                            print ""
+                            print "Raw words."
+                        }
+                    }
+                }
+            '
+            """
+        try script.write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: Int16(0o700))],
+            ofItemAtPath: executable.path)
+    }
+
     private func temporaryDirectory(_ label: String) throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(
@@ -94,5 +264,13 @@ final class RecordingTranscriptionServiceTests: XCTestCase {
             at: url,
             withIntermediateDirectories: true)
         return url
+    }
+
+    private enum TestError: Error, LocalizedError {
+        case renameFailed
+
+        var errorDescription: String? {
+            "rename failed"
+        }
     }
 }

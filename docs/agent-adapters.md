@@ -18,18 +18,23 @@ By default, the process receives only `HOME`, `PATH`, `TMPDIR`, `LANG`, and `USE
 
 ## Output
 
-The optional first line is:
+The required first line is:
 
 ```markdown
 <!-- topic: lowercase-topic-slug -->
 ```
 
-It is removed before the note is saved and may rename the note. The remaining output must:
+It is removed before the note is saved and renames the note. Output without a valid topic
+is rejected, leaving the raw transcript under its provisional application-based name and
+showing a processing warning. The remaining output must:
 
 - Preserve YAML frontmatter exactly
 - Add `## Summary` before `## Transcript`
 - Preserve the trailing `<!-- meetscribe: ... -->` metadata comment exactly
 - Preserve every timestamp and `**Me:**` / `**Them:**` turn marker in order
+- Preserve recognizable source words in every non-empty turn and at least half
+  of the transcript tokens overall
+- Avoid expanding the transcript body beyond the bounded validation allowance
 
 Example:
 
@@ -50,7 +55,9 @@ The team reviewed the project.
 <!-- meetscribe: app=zoom, duration=00:10:00, model=example, cleaned=false, processor=none -->
 ```
 
-MeetScribe rejects structurally unsafe output and keeps the raw local transcript.
+Topic slugs are limited to three words and 64 UTF-8 bytes. MeetScribe rejects
+structurally unsafe or excessively rewritten output and keeps the raw local
+transcript.
 
 ## Example Adapter
 

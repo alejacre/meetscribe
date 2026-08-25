@@ -44,7 +44,9 @@ final class TranscriptProcessorTests: XCTestCase {
         let root = try temporaryDirectory("processor-invalid")
         defer { try? FileManager.default.removeItem(at: root) }
         let executable = root.appendingPathComponent("invalid-agent")
-        try makeExecutable("#!/bin/sh\nprintf 'not a transcript\\n'\n", at: executable)
+        try makeExecutable(
+            "#!/bin/sh\nprintf '<!-- topic: planning -->\\nnot a transcript\\n'\n",
+            at: executable)
         let configuration = AgentConfiguration(
             provider: .customCommand,
             customExecutable: executable.path,
@@ -56,6 +58,35 @@ final class TranscriptProcessorTests: XCTestCase {
             try CommandTranscriptProcessor(configuration: configuration).process(originalTranscript())
         ) { error in
             guard case CommandTranscriptProcessor.ProcessorError.invalidOutput = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
+    }
+
+    func testCustomCommandRejectsStructurallyValidOutputWithoutTopic() throws {
+        let root = try temporaryDirectory("processor-missing-topic")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executable = root.appendingPathComponent("missing-topic-agent")
+        let output = processedTranscript()
+            .replacingOccurrences(of: "<!-- topic: planning -->\n", with: "")
+        let script = """
+            #!/bin/sh
+            cat <<'MEETSCRIBE_OUTPUT'
+            \(output)
+            MEETSCRIBE_OUTPUT
+            """
+        try makeExecutable(script, at: executable)
+        let configuration = AgentConfiguration(
+            provider: .customCommand,
+            customExecutable: executable.path,
+            customArguments: [],
+            customPrompt: "",
+            inheritEnvironment: false)
+
+        XCTAssertThrowsError(
+            try CommandTranscriptProcessor(configuration: configuration).process(originalTranscript())
+        ) { error in
+            guard case CommandTranscriptProcessor.ProcessorError.missingTopic = error else {
                 return XCTFail("unexpected error: \(error)")
             }
         }
