@@ -58,15 +58,22 @@ Publication uploads a complete package into:
 <remote-folder>/.meetscribe-incoming/<upload-id>
 ```
 
-It then renames that temporary directory to the final recording name. Failed uploads remain outside the final name and can be retried.
+The upload identifier is stable for a recording. Before each attempt, MeetScribe
+removes known files from any previous partial upload at that identifier. It also
+attempts the same cleanup when an upload or promotion fails, and reports when
+that cleanup cannot be confirmed. A retry therefore reuses and cleans the same
+staging location instead of accumulating a new directory for every attempt.
+
+MeetScribe then renames the temporary directory to the final recording name.
 
 When the final directory already exists, MeetScribe first attempts the server's
 atomic rename extension. If the server rejects replacement, it moves the
 existing directory into the private incoming area, promotes the completed
 upload, and removes the known backup files. Backup and promotion are separate
 SFTP operations: if either operation has an ambiguous transport failure,
-MeetScribe attempts to restore the backup before reporting failure. Recoverable
-data remains under `.meetscribe-incoming` until a later retry or cleanup.
+MeetScribe attempts to restore the backup before reporting failure. Backup data
+can remain under `.meetscribe-incoming` when the remote state is ambiguous; the
+error is surfaced for operator review.
 
 Before enabling SFTP, verify the host key outside MeetScribe:
 
