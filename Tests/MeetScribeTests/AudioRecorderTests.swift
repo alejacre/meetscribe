@@ -3,6 +3,39 @@ import AVFoundation
 @testable import MeetScribe
 
 final class AudioRecorderTests: XCTestCase {
+    func testPreferredDisplayUsesBuiltInBeforeExternalMainDisplay() {
+        let displayIDs: [CGDirectDisplayID] = [30, 10]
+
+        let index = AudioRecorder.preferredDisplayIndex(
+            displayIDs: displayIDs,
+            mainDisplayID: 30,
+            isBuiltIn: { $0 == 10 })
+
+        XCTAssertEqual(index, 1)
+    }
+
+    func testPreferredDisplayFallsBackToMainThenFirstAvailable() {
+        let displayIDs: [CGDirectDisplayID] = [30, 40]
+
+        XCTAssertEqual(
+            AudioRecorder.preferredDisplayIndex(
+                displayIDs: displayIDs,
+                mainDisplayID: 40,
+                isBuiltIn: { _ in false }),
+            1)
+        XCTAssertEqual(
+            AudioRecorder.preferredDisplayIndex(
+                displayIDs: displayIDs,
+                mainDisplayID: 50,
+                isBuiltIn: { _ in false }),
+            0)
+        XCTAssertNil(
+            AudioRecorder.preferredDisplayIndex(
+                displayIDs: [],
+                mainDisplayID: 50,
+                isBuiltIn: { _ in false }))
+    }
+
     func testIdleRecorderStoresCallbackAndStopsIdempotently() async throws {
         let recorder = AudioRecorder()
         recorder.onStreamDied = { _ in }

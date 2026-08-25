@@ -35,8 +35,29 @@ enum TranscriptFormatter {
                 guard m.start < s.end + echoTimeSlack, m.end > s.start - echoTimeSlack else { continue }
                 let sText = normalize(s.text)
                 if sText.contains(mText) || mText.contains(sText) { return false }
+                let micTokens = mText.split(separator: " ").map(String.init)
+                let systemTokens = sText.split(separator: " ").map(String.init)
+                let overlap = tokenOverlap(micTokens, systemTokens)
+                let shorterCount = min(micTokens.count, systemTokens.count)
+                let longerCount = max(micTokens.count, systemTokens.count)
+                if shorterCount >= 3,
+                   overlap >= 3,
+                   Double(overlap) / Double(shorterCount) >= 0.75,
+                   Double(overlap) / Double(longerCount) >= 0.45
+                {
+                    return false
+                }
             }
             return true
+        }
+    }
+
+    private static func tokenOverlap(_ left: [String], _ right: [String]) -> Int {
+        var remaining = Dictionary(right.map { ($0, 1) }, uniquingKeysWith: +)
+        return left.reduce(into: 0) { overlap, token in
+            guard remaining[token, default: 0] > 0 else { return }
+            overlap += 1
+            remaining[token, default: 0] -= 1
         }
     }
 

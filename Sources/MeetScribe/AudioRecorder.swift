@@ -1,6 +1,7 @@
 import Foundation
 import ScreenCaptureKit
 import AVFoundation
+import CoreGraphics
 
 protocol AudioRecording: AnyObject, Sendable {
     var sourceWarning: String? { get }
@@ -33,10 +34,15 @@ final class AudioRecorder: NSObject, AudioRecording, SCStreamOutput, SCStreamDel
         try session.createFolder()
         self.session = session
         let content = try await SCShareableContent.current
-        guard let display = content.displays.first else {
+        guard let displayIndex = Self.preferredDisplayIndex(
+            displayIDs: content.displays.map(\.displayID),
+            mainDisplayID: CGMainDisplayID(),
+            isBuiltIn: { CGDisplayIsBuiltin($0) != 0 })
+        else {
             throw NSError(domain: "MeetScribe", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: "No display found (screen recording permission?)"])
         }
+        let display = content.displays[displayIndex]
         let filter: SCContentFilter
         if let targetBundleID {
             guard let app = content.applications.first(where: { $0.bundleIdentifier == targetBundleID }) else {
@@ -63,6 +69,10 @@ final class AudioRecorder: NSObject, AudioRecording, SCStreamOutput, SCStreamDel
         config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
 
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
+        // ScreenCaptureKit still produces the required tiny video stream. Attach
+        // an output and discard its frames instead of making the framework report
+        // a missing video output once per second.
+        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
         try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: queue)
         stateLock.withLock { self.stream = stream }
@@ -136,6 +146,19 @@ final class AudioRecorder: NSObject, AudioRecording, SCStreamOutput, SCStreamDel
             [.posixPermissions: NSNumber(value: Int16(0o600))],
             ofItemAtPath: url.path)
         return file
+    }
+
+    /// Audio capture must be anchored to a display even though MeetScribe never
+    /// saves video. Prefer the built-in display so a flaky dock or external
+    /// monitor hot-plug does not terminate an otherwise healthy recording.
+    static func preferredDisplayIndex(
+        displayIDs: [CGDirectDisplayID],
+        mainDisplayID: CGDirectDisplayID,
+        isBuiltIn: (CGDirectDisplayID) -> Bool
+    ) -> Int? {
+        displayIDs.firstIndex(where: isBuiltIn)
+            ?? displayIDs.firstIndex(of: mainDisplayID)
+            ?? displayIDs.indices.first
     }
 
     /// Offline mix mic + system into audio.m4a after stop.

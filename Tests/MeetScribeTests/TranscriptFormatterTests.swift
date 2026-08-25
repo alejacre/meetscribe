@@ -81,6 +81,20 @@ final class TranscriptFormatterTests: XCTestCase {
         XCTAssertEqual(filtered, [])
     }
 
+    func testEchoSuppressionHandlesSmallRecognitionDifferences() {
+        let system = [seg(0, 5, "That's why we're saying we had to take two planes")]
+        let mic = [seg(0.2, 4.8, "we had to take two planes, five")]
+        let filtered = TranscriptFormatter.suppressEcho(mic: mic, system: system)
+        XCTAssertEqual(filtered, [])
+    }
+
+    func testEchoSuppressionKeepsWeakLexicalOverlap() {
+        let system = [seg(0, 5, "We need to review the quarterly business results")]
+        let mic = [seg(0.2, 4.8, "Can we review this another day instead?")]
+        let filtered = TranscriptFormatter.suppressEcho(mic: mic, system: system)
+        XCTAssertEqual(filtered, mic)
+    }
+
     func testMarkProcessedPatchesHeaderLine() {
         let md = TranscriptFormatter.format(mic: [], system: [],
                                             header: .init(date: "d", app: "a", duration: "x", model: "m", cleanedByClaude: false))
