@@ -24,14 +24,14 @@ final class SetupModelTests: XCTestCase {
             .appendingPathComponent("hf-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let repo = "mlx-community/whisper-large-v3-turbo"
-        XCTAssertFalse(SetupModel.modelCached(repo, cacheRoot: root))
+        XCTAssertFalse(WhisperModels.isCached(repo, cacheRoot: root))
 
         let model = try XCTUnwrap(WhisperModels.model(id: repo))
         let dir = WhisperModels.snapshotURL(for: model, cacheRoot: root)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try Data("{}".utf8).write(to: dir.appendingPathComponent("config.json"))
         try Data("weights".utf8).write(to: dir.appendingPathComponent("weights.safetensors"))
-        XCTAssertTrue(SetupModel.modelCached(repo, cacheRoot: root))
+        XCTAssertTrue(WhisperModels.isCached(repo, cacheRoot: root))
     }
 
     func testProgressPercent() {
@@ -64,7 +64,7 @@ final class SetupModelTests: XCTestCase {
         XCTAssertEqual(log, "xy")
     }
 
-    func testStepTitlesAndManagedEnvironment() {
+    func testStepTitles() {
         XCTAssertEqual(
             SetupStep.allCases.map(\.title),
             [
@@ -76,12 +76,6 @@ final class SetupModelTests: XCTestCase {
                 "Transcript agent",
                 "All set",
             ])
-        XCTAssertEqual(
-            SetupModel.managedToolEnvironment["UV_TOOL_DIR"],
-            SetupModel.managedToolRoot.path)
-        XCTAssertEqual(
-            SetupModel.managedToolEnvironment["UV_TOOL_BIN_DIR"],
-            SetupModel.managedBinRoot.path)
     }
 
     func testCheckEngineAcceptsConfiguredAndPinnedDiscoveredTools() async throws {

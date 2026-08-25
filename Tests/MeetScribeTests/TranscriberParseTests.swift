@@ -10,12 +10,11 @@ final class TranscriberParseTests: XCTestCase {
            {"id": 1, "start": 2.0, "end": 3.0, "text": " Adiós.", "tokens": [2], "temperature": 0.0}
          ]}
         """.data(using: .utf8)!
-        let segs = try Transcriber.parseSegments(json)
+        let transcript = try Transcriber.parseTranscript(json)
+        let segs = transcript.segments
         XCTAssertEqual(segs, [WhisperSegment(start: 0.0, end: 1.5, text: " Hola."),
                               WhisperSegment(start: 2.0, end: 3.0, text: " Adiós.")])
-        let transcript = try Transcriber.parseTranscript(json)
         XCTAssertEqual(transcript.language, "es")
-        XCTAssertEqual(transcript.segments, segs)
     }
 
     func testNormalizesSupportedLanguageNames() throws {

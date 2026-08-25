@@ -110,10 +110,6 @@ struct Transcriber {
             language: normalizedLanguage(root.language))
     }
 
-    static func parseSegments(_ data: Data) throws -> [WhisperSegment] {
-        try parseTranscript(data).segments
-    }
-
     private static func needsLanguageRetry(
         _ transcript: DetectedTranscript
     ) -> Bool {

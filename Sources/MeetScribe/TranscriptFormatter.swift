@@ -135,11 +135,6 @@ enum TranscriptFormatter {
             with: "cleaned=true, processor=\(RecordingSession.slug(processorID)) -->")
     }
 
-    /// Backward-compatible helper for callers and older tests.
-    static func markCleaned(_ markdown: String) -> String {
-        markProcessed(markdown, by: "claude-code")
-    }
-
     /// Extracts the body of the optional "## Summary" section,
     /// or nil if the transcript has none.
     static func extractSummary(_ markdown: String) -> String? {

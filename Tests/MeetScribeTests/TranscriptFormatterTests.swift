@@ -81,10 +81,10 @@ final class TranscriptFormatterTests: XCTestCase {
         XCTAssertEqual(filtered, [])
     }
 
-    func testMarkCleanedPatchesHeaderLine() {
+    func testMarkProcessedPatchesHeaderLine() {
         let md = TranscriptFormatter.format(mic: [], system: [],
                                             header: .init(date: "d", app: "a", duration: "x", model: "m", cleanedByClaude: false))
-        let patched = TranscriptFormatter.markCleaned(md)
+        let patched = TranscriptFormatter.markProcessed(md, by: "claude-code")
         XCTAssertTrue(patched.contains("cleaned=true, processor=claude-code -->"))
         XCTAssertFalse(patched.contains("cleaned=false"))
     }

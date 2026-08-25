@@ -99,13 +99,6 @@ final class SetupModel: ObservableObject {
             .appendingPathComponent("Library/Application Support/MeetScribe/bin", isDirectory: true)
     }
 
-    nonisolated static var managedToolEnvironment: [String: String] {
-        var environment = ProcessInfo.processInfo.environment
-        environment["UV_TOOL_DIR"] = managedToolRoot.path
-        environment["UV_TOOL_BIN_DIR"] = managedBinRoot.path
-        return environment
-    }
-
     init(
         settings: Settings = Settings(),
         dependencies: SetupModelDependencies = .live
@@ -267,12 +260,6 @@ final class SetupModel: ObservableObject {
                 self.modelPhase = .failed(error.localizedDescription)
             }
         }
-    }
-
-    /// Maps a HF repo id to its cache dir and checks existence.
-    /// `mlx-community/whisper-large-v3-turbo` → `~/.cache/huggingface/hub/models--mlx-community--whisper-large-v3-turbo`.
-    nonisolated static func modelCached(_ repo: String, cacheRoot: URL? = nil) -> Bool {
-        WhisperModels.isCached(repo, cacheRoot: cacheRoot)
     }
 
     nonisolated static func isPinnedEngineList(_ output: String) -> Bool {
