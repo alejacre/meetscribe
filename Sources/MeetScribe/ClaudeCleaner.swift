@@ -10,11 +10,14 @@ enum ClaudeCleaner {
     }
 
     enum CleanError: Error, LocalizedError {
+        case unavailable
         case notLoggedIn
         case missingTopic
         case invalidOutput
         var errorDescription: String? {
             switch self {
+            case .unavailable:
+                "Claude Code is configured, but the `claude` executable is unavailable"
             case .notLoggedIn:
                 "claude CLI is not logged in  -  run `claude /login`"
             case .missingTopic:
@@ -33,7 +36,11 @@ enum ClaudeCleaner {
 
     /// Returns cleaned markdown + topic slug, or nil if claude is unavailable.
     static func clean(_ markdown: String, binary: String? = nil) throws -> Result? {
-        guard let bin = binary ?? ToolFinder.findTool("claude") else { return nil }
+        guard let bin = binary ?? ToolFinder.findTool("claude"),
+              FileManager.default.isExecutableFile(atPath: bin)
+        else {
+            throw CleanError.unavailable
+        }
         let raw = try Subprocess.run(
             bin,
             [

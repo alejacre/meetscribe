@@ -30,7 +30,24 @@ struct RecordingExportPackage: Sendable {
     let basename: String
     let files: [RecordingExportFile]
 
-    init(session: RecordingSession, includeAudio: Bool) throws {
+    static func knownRelativePaths(basename: String) -> [String] {
+        let assetPrefix = ".assets/\(basename)"
+        return [
+            "\(basename).md",
+            "\(assetPrefix)/manifest.json",
+            "\(assetPrefix)/transcript.json",
+            "\(assetPrefix)/audio.m4a",
+            "\(assetPrefix)/mic.m4a",
+            "\(assetPrefix)/system.m4a",
+        ]
+    }
+
+    init(
+        session: RecordingSession,
+        includeManifest: Bool = false,
+        includeRawTranscript: Bool = false,
+        includeAudio: Bool
+    ) throws {
         guard FileManager.default.fileExists(atPath: session.noteURL.path) else {
             throw DestinationError.missingTranscript
         }
@@ -43,8 +60,12 @@ struct RecordingExportPackage: Sendable {
                 relativePath: session.noteURL.lastPathComponent)
         ]
         let assetPrefix = ".assets/\(session.basename)"
-        for url in [session.manifestURL, session.transcriptJSON]
-        where FileManager.default.fileExists(atPath: url.path) {
+        let sidecars = [
+            (session.manifestURL, includeManifest),
+            (session.transcriptJSON, includeRawTranscript),
+        ]
+        for (url, included) in sidecars
+        where included && FileManager.default.fileExists(atPath: url.path) {
             files.append(RecordingExportFile(
                 sourceURL: url,
                 relativePath: "\(assetPrefix)/\(url.lastPathComponent)"))
@@ -76,9 +97,16 @@ protocol RecordingDestination: Sendable {
     var displayName: String { get }
     var configurationFingerprint: String { get }
     var includeAudio: Bool { get }
+    var includeManifest: Bool { get }
+    var includeRawTranscript: Bool { get }
 
     func validateConnection() throws
     func publish(_ package: RecordingExportPackage) throws
+}
+
+extension RecordingDestination {
+    var includeManifest: Bool { false }
+    var includeRawTranscript: Bool { false }
 }
 
 enum DestinationError: Error, LocalizedError {
@@ -134,6 +162,8 @@ struct GitRepositoryDestination: RecordingDestination {
     }
 
     var includeAudio: Bool { configuration.includeAudio }
+    var includeManifest: Bool { configuration.includeManifest }
+    var includeRawTranscript: Bool { configuration.includeRawTranscript }
     var configurationFingerprint: String { fingerprint(configuration) }
 
     func validateConnection() throws {
@@ -215,7 +245,12 @@ struct GitRepositoryDestination: RecordingDestination {
 
     private func git(_ arguments: [String]) throws -> String {
         let executable = ToolFinder.findTool("git") ?? "/usr/bin/git"
-        return try runner.run(executable, arguments, nil, 180, nil)
+        return try runner.run(
+            executable,
+            arguments,
+            nil,
+            180,
+            Subprocess.destinationEnvironment)
     }
 
     private func requireUpstream() throws {
@@ -245,6 +280,8 @@ struct SFTPDestination: RecordingDestination {
     }
 
     var includeAudio: Bool { configuration.includeAudio }
+    var includeManifest: Bool { configuration.includeManifest }
+    var includeRawTranscript: Bool { configuration.includeRawTranscript }
     var configurationFingerprint: String { fingerprint(configuration) }
 
     func validateConnection() throws {
@@ -255,7 +292,7 @@ struct SFTPDestination: RecordingDestination {
             Self.arguments(host: configuration.host),
             try SFTPBatch.validationCommands(remoteRoot: remoteRoot),
             30,
-            ProcessInfo.processInfo.environment)
+            Subprocess.destinationEnvironment)
     }
 
     func publish(_ package: RecordingExportPackage) throws {
@@ -282,7 +319,7 @@ struct SFTPDestination: RecordingDestination {
                     remoteRoot: remoteRoot,
                     uploadID: uploadID),
                 600,
-                ProcessInfo.processInfo.environment)
+                Subprocess.destinationEnvironment)
 
             do {
                 try runBatch(try SFTPBatch.finalizeCommands(
@@ -376,7 +413,7 @@ struct SFTPDestination: RecordingDestination {
             Self.arguments(host: configuration.host),
             commands,
             60,
-            ProcessInfo.processInfo.environment)
+            Subprocess.destinationEnvironment)
     }
 
     private func restoreBackupOrThrow(
@@ -499,14 +536,9 @@ enum SFTPBatch {
         let incomingRoot = "\(remoteRoot)/.meetscribe-incoming"
         let remotePackage = "\(incomingRoot)/\(directoryID)"
         let packageAssets = "\(remotePackage)/.assets/\(finalDirectory)"
-        let knownFiles = [
-            "\(remotePackage)/\(finalDirectory).md",
-            "\(packageAssets)/manifest.json",
-            "\(packageAssets)/transcript.json",
-            "\(packageAssets)/audio.m4a",
-            "\(packageAssets)/mic.m4a",
-            "\(packageAssets)/system.m4a",
-        ]
+        let knownFiles = RecordingExportPackage
+            .knownRelativePaths(basename: finalDirectory)
+            .map { "\(remotePackage)/\($0)" }
         let cleanup = try knownFiles.map { "-rm \(try quote($0))" } + [
             "-rmdir \(try quote(packageAssets))",
             "-rmdir \(try quote("\(remotePackage)/.assets"))",

@@ -8,6 +8,7 @@ struct MeetScribeApp: App {
     private let firstRun: Bool
 
     init() {
+        SensitiveFilePermissions.install()
         let s = AppState()
         _state = StateObject(wrappedValue: s)
         _coordinator = StateObject(wrappedValue: RecordingCoordinator(state: s))
@@ -64,6 +65,20 @@ struct MeetScribeApp: App {
                     }
                     Button("Open Microphone settings") {
                         openPrivacyPane("Privacy_Microphone")
+                    }
+                }
+            }
+            if state.phase == .idle, !state.pendingMeetingPrompts.isEmpty {
+                Divider()
+                Menu("Detected meetings") {
+                    ForEach(state.pendingMeetingPrompts) { meeting in
+                        Button("Record \(meeting.appName.capitalized)") {
+                            Task {
+                                await coordinator.startRecording(
+                                    trigger: .meetingPrompt,
+                                    meeting: meeting)
+                            }
+                        }
                     }
                 }
             }
@@ -136,7 +151,10 @@ struct MeetScribeApp: App {
         }
         SwiftUI.Settings { SettingsView() }
         Window("Recordings", id: "recordings") {
-            RecordingsView(state: state)
+            RecordingsView(
+                state: state,
+                onRetryTranscription: coordinator.retryTranscription,
+                onRetryPublication: coordinator.retryPublication)
         }
             .defaultSize(width: 1080, height: 720)
         Window("MeetScribe Setup", id: "setup") { SetupView() }

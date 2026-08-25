@@ -23,6 +23,10 @@ MeetScribe is an open source macOS menu bar app that records meetings, transcrib
 them locally with MLX Whisper, optionally processes the Markdown with a CLI agent,
 and publishes completed notes to storage you operate.
 
+> **Project status:** pre-release. Builds and automated tests are maintained, but
+> real meeting capture, authenticated agents, SFTP, signing, and notarization still
+> require the documented manual release checks.
+
 Local files are always written first. Agents, Git publishing, SFTP, and remote audio
 export remain disabled until you configure them.
 
@@ -70,7 +74,8 @@ flowchart LR
 - Separate microphone and meeting-audio capture through ScreenCaptureKit.
 - Locked and verified MLX Whisper model revisions for Apple Silicon.
 - Claude Code adapter pinned to Haiku, with tools and session persistence disabled.
-- Kiro CLI adapter with a temporary tool-free agent and automatic session cleanup.
+- Kiro CLI adapter with stdin transcript delivery, a temporary tool-free agent,
+  and automatic session cleanup.
 - Generic command adapter with literal arguments, restricted environment, and
   structural output validation.
 - Git publication with clean-worktree checks, scoped commits, and upstream push.
@@ -133,7 +138,8 @@ Open **Settings > Destinations**:
 - **SFTP over SSH** uses strict host checking, your OpenSSH authentication, a
   temporary remote directory, and atomic rename.
 
-Audio export is off by default. See [Destinations](docs/destinations.md).
+Destinations export Markdown only by default. Manifest, raw JSON, and audio are
+separate explicit options. See [Destinations](docs/destinations.md).
 
 ## Output format
 
@@ -173,8 +179,11 @@ state.
 - Recording assets and manifests use owner-only permissions.
 - Transcript agents and remote destinations require explicit configuration.
 - Enabled agents receive the complete transcript.
-- Git and SFTP export Markdown, manifest, and transcript JSON; audio is separate
-  opt-in.
+- Git and SFTP export Markdown by default; manifest, raw JSON, and audio are
+  separate opt-ins.
+- Privacy settings can delete separate source tracks after transcription and
+  expire audio or raw Whisper JSON after 7, 30, or 90 days. Notes and manifests
+  are never deleted automatically.
 - MeetScribe never stores SSH passwords or private keys.
 
 You are responsible for obtaining any recording consent required by your

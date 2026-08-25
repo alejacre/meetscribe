@@ -14,6 +14,7 @@ struct Settings: @unchecked Sendable {
         static let agentConfiguration = "agentConfiguration.v1"
         static let meetingRules = "meetingRules.v1"
         static let destinations = "destinationConfiguration.v1"
+        static let retention = "retentionConfiguration.v1"
         static let hotKeyEnabled = "hotKeyEnabled"
         static let setupCompleted = "setupCompleted"
         static let screenPermissionRequested = "screenPermissionRequested"
@@ -73,6 +74,11 @@ struct Settings: @unchecked Sendable {
     var destinationConfiguration: DestinationConfiguration {
         get { decode(Key.destinations) ?? DestinationConfiguration() }
         set { encode(newValue, forKey: Key.destinations) }
+    }
+
+    var retentionConfiguration: RetentionConfiguration {
+        get { decode(Key.retention) ?? RetentionConfiguration() }
+        set { encode(newValue, forKey: Key.retention) }
     }
 
     var hotKeyEnabled: Bool {

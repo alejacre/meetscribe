@@ -34,11 +34,11 @@ final class MeetingDetectorTests: XCTestCase {
             appDefinitions: { definitions },
             activeApplications: { knownApps in
                 XCTAssertEqual(knownApps, definitions)
-                return harness.snapshots.removeFirst()
+                return .success(harness.snapshots.removeFirst())
             },
             isZoomMeetingActive: { harness.zoomIsActive })
-        detector.onMeetingStart = { events.append("start:\($0.bundleID)") }
-        detector.onMeetingEnd = { events.append("end:\($0.bundleID)") }
+        detector.onMeetingStart = { meeting in events.append("start:\(meeting.bundleID)") }
+        detector.onMeetingEnd = { meeting in events.append("end:\(meeting.bundleID)") }
 
         detector.poll()
         harness.zoomIsActive = true
@@ -67,10 +67,10 @@ final class MeetingDetectorTests: XCTestCase {
             appDefinitions: { [:] },
             activeApplications: { _ in
                 harness.pollCount += 1
-                return [meeting]
+                return .success([meeting])
             },
             isZoomMeetingActive: { false })
-        detector.onMeetingStart = { _ in started.fulfill() }
+        detector.onMeetingStart = { (_: DetectedMeeting) in started.fulfill() }
 
         detector.startPolling(interval: 0.01)
         await fulfillment(of: [started], timeout: 1)
@@ -88,6 +88,30 @@ final class MeetingDetectorTests: XCTestCase {
             Dictionary(uniqueKeysWithValues: MeetingApps.defaults.map { ($0.bundleID, $0.appName) }))
     }
 
+    func testProbeFailurePreservesMeetingAndConfirmedAbsenceEndsIt() {
+        let meeting = DetectedMeeting(bundleID: "test.meeting", appName: "test")
+        let harness = ProbeHarness(results: [
+            .success([meeting]),
+            .failure,
+            .success([]),
+            .success([]),
+        ])
+        var events: [String] = []
+        let detector = MeetingDetector(
+            appDefinitions: { [:] },
+            activeApplications: { _ in harness.results.removeFirst() },
+            isZoomMeetingActive: { false })
+        detector.onMeetingStart = { _ in events.append("start") }
+        detector.onMeetingEnd = { _ in events.append("end") }
+
+        detector.poll()
+        detector.poll()
+        detector.poll()
+        XCTAssertEqual(events, ["start"])
+        detector.poll()
+        XCTAssertEqual(events, ["start", "end"])
+    }
+
     private final class PollHarness: @unchecked Sendable {
         var snapshots: [[DetectedMeeting]]
         var zoomIsActive = false
@@ -95,6 +119,14 @@ final class MeetingDetectorTests: XCTestCase {
 
         init(snapshots: [[DetectedMeeting]] = []) {
             self.snapshots = snapshots
+        }
+    }
+
+    private final class ProbeHarness: @unchecked Sendable {
+        var results: [MeetingProbeResult]
+
+        init(results: [MeetingProbeResult]) {
+            self.results = results
         }
     }
 }

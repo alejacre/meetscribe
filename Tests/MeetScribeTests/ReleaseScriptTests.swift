@@ -27,4 +27,18 @@ final class ReleaseScriptTests: XCTestCase {
         XCTAssertLessThan(staple, archiveCalls[1])
         XCTAssertLessThan(archiveCalls[1], checksum)
     }
+
+    func testReleaseRequiresSemanticVersionCleanTreeAndMatchingTag() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let script = try String(
+            contentsOf: repository.appendingPathComponent("scripts/release.sh"),
+            encoding: .utf8)
+
+        XCTAssertTrue(script.contains("VERSION must use semantic versioning"))
+        XCTAssertTrue(script.contains("Release requires a clean working tree"))
+        XCTAssertTrue(script.contains("HEAD must be tagged v$VERSION before release"))
+    }
 }

@@ -11,9 +11,25 @@ final class RecordingDestinationTests: XCTestCase {
         let paths = Set(package.files.map(\.relativePath))
 
         XCTAssertTrue(paths.contains(session.noteURL.lastPathComponent))
-        XCTAssertTrue(paths.contains(".assets/\(session.basename)/manifest.json"))
-        XCTAssertTrue(paths.contains(".assets/\(session.basename)/transcript.json"))
+        XCTAssertFalse(paths.contains(".assets/\(session.basename)/manifest.json"))
+        XCTAssertFalse(paths.contains(".assets/\(session.basename)/transcript.json"))
         XCTAssertFalse(paths.contains(".assets/\(session.basename)/audio.m4a"))
+    }
+
+    func testExportPackageIncludesOnlySelectedSidecars() throws {
+        let root = try temporaryDirectory("export-sidecars")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = try populatedSession(root: root)
+
+        let package = try RecordingExportPackage(
+            session: session,
+            includeManifest: true,
+            includeRawTranscript: false,
+            includeAudio: false)
+        let paths = Set(package.files.map(\.relativePath))
+
+        XCTAssertTrue(paths.contains(".assets/\(session.basename)/manifest.json"))
+        XCTAssertFalse(paths.contains(".assets/\(session.basename)/transcript.json"))
     }
 
     func testExportPackageIncludesAudioAndMaterializesAtomically() throws {
@@ -326,6 +342,7 @@ final class RecordingDestinationTests: XCTestCase {
             enabled: true,
             repositoryPath: repository.path,
             relativePath: "meetings",
+            includeManifest: true,
             includeAudio: false))
 
         XCTAssertThrowsError(try destination.validateConnection()) { error in
@@ -379,9 +396,13 @@ final class RecordingDestinationTests: XCTestCase {
             enabled: true,
             repositoryPath: repository.path,
             relativePath: "meetings",
+            includeManifest: true,
             includeAudio: false))
 
-        try destination.publish(RecordingExportPackage(session: session, includeAudio: false))
+        try destination.publish(RecordingExportPackage(
+            session: session,
+            includeManifest: true,
+            includeAudio: false))
 
         let note = repository.appendingPathComponent("meetings/\(session.noteURL.lastPathComponent)")
         let manifest = repository.appendingPathComponent(

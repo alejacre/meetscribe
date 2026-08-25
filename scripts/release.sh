@@ -6,8 +6,20 @@ cd "$(dirname "$0")/.."
 : "${NOTARY_PROFILE:?Set NOTARY_PROFILE to a notarytool keychain profile}"
 : "${VERSION:?Set VERSION, for example 1.2.0}"
 
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "VERSION must use semantic versioning, for example 1.2.0" >&2
+    exit 1
+fi
 if [[ "$CODESIGN_IDENTITY" != Developer\ ID\ Application:* ]]; then
     echo "CODESIGN_IDENTITY must be a Developer ID Application identity" >&2
+    exit 1
+fi
+if ! git diff --quiet || ! git diff --cached --quiet; then
+    echo "Release requires a clean working tree" >&2
+    exit 1
+fi
+if [ "$(git tag --points-at HEAD | grep -Fx "v$VERSION" || true)" != "v$VERSION" ]; then
+    echo "HEAD must be tagged v$VERSION before release" >&2
     exit 1
 fi
 

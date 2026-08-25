@@ -18,6 +18,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp ".build/$CONFIGURATION/MeetScribe" "$APP/Contents/MacOS/"
 cp Info.plist "$APP/Contents/"
 cp Assets/AppIcon.icns "$APP/Contents/Resources/"
+cp Assets/mlx-whisper-constraints.txt "$APP/Contents/Resources/"
 
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$APP/Contents/Info.plist"

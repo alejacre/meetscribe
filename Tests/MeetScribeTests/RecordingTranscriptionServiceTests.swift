@@ -44,6 +44,30 @@ final class RecordingTranscriptionServiceTests: XCTestCase {
         XCTAssertNil(result.processingWarning)
     }
 
+    func testRunAppliesOptInSourceTrackRetention() throws {
+        let root = try temporaryDirectory("transcription-retention")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = RecordingSession(root: root, start: Date(), appName: "teams")
+        try session.createFolder()
+        try Data("mic".utf8).write(to: session.micURL)
+        try Data("system".utf8).write(to: session.systemURL)
+        let configuration = RecordingTranscriptionConfiguration(
+            mlxWhisperPath: "/unused",
+            whisperModel: "test/model",
+            agentConfiguration: .disabled,
+            retentionConfiguration: RetentionConfiguration(
+                deleteSourceTracksAfterTranscription: true))
+
+        let result = try RecordingTranscriptionService.run(
+            session: session,
+            configuration: configuration,
+            trackTranscriber: testTracks())
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: result.finalSession.micURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: result.finalSession.systemURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: result.finalSession.noteURL.path))
+    }
+
     func testRunKeepsRawTranscriptWhenAgentFails() throws {
         let root = try temporaryDirectory("transcription-agent-failure")
         defer { try? FileManager.default.removeItem(at: root) }

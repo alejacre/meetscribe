@@ -2,13 +2,8 @@
 
 Every recording is staged and retained locally before publication. Destinations are disabled by default and operate only after a transcript is ready.
 
-The default export contains:
-
-- Markdown note
-- `manifest.json`
-- Raw `transcript.json`
-
-Mixed and source audio tracks are separate opt-in.
+The default export contains only the Markdown note. The recovery manifest, raw
+`transcript.json`, and mixed/source audio tracks are separate opt-ins.
 
 ## Git
 
@@ -16,6 +11,8 @@ Configuration:
 
 - Repository root
 - Relative folder inside the repository
+- Include recovery manifest toggle
+- Include raw Whisper JSON toggle
 - Include audio toggle
 
 Requirements:

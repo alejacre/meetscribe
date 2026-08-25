@@ -246,6 +246,7 @@ final class ViewRenderingTests: XCTestCase {
         evaluate(ProgressLogView(log: "", progress: nil, caption: nil))
         evaluate(ProgressLogView(log: "working", progress: nil, caption: "Installing"))
         evaluate(ProgressLogView(log: "50%", progress: 50, caption: "Downloading"))
+        evaluate(PrivacySettingsPane())
     }
 
     func testMenuSceneBuildsOperationalStates() throws {
@@ -271,6 +272,9 @@ final class ViewRenderingTests: XCTestCase {
         state.lastError = "Permission failed"
         state.showPermissionHelp = true
         state.isQuitting = true
+        state.pendingMeetingPrompts = [
+            DetectedMeeting(bundleID: "test.meeting", appName: "test")
+        ]
         let root = try temporaryDirectory("menu-recording")
         let session = RecordingSession(root: root, start: Date(), appName: "zoom")
         try session.createFolder()

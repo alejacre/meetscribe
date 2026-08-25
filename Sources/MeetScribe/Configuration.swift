@@ -111,14 +111,80 @@ struct GitDestinationConfiguration: Codable, Equatable, Sendable {
     var enabled = false
     var repositoryPath = ""
     var relativePath = "meetings"
+    var includeManifest = false
+    var includeRawTranscript = false
     var includeAudio = false
+
+    private enum CodingKeys: String, CodingKey {
+        case enabled, repositoryPath, relativePath
+        case includeManifest, includeRawTranscript, includeAudio
+    }
+
+    init(
+        enabled: Bool = false,
+        repositoryPath: String = "",
+        relativePath: String = "meetings",
+        includeManifest: Bool = false,
+        includeRawTranscript: Bool = false,
+        includeAudio: Bool = false
+    ) {
+        self.enabled = enabled
+        self.repositoryPath = repositoryPath
+        self.relativePath = relativePath
+        self.includeManifest = includeManifest
+        self.includeRawTranscript = includeRawTranscript
+        self.includeAudio = includeAudio
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try values.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        repositoryPath = try values.decodeIfPresent(String.self, forKey: .repositoryPath) ?? ""
+        relativePath = try values.decodeIfPresent(String.self, forKey: .relativePath) ?? "meetings"
+        includeManifest = try values.decodeIfPresent(Bool.self, forKey: .includeManifest) ?? false
+        includeRawTranscript = try values.decodeIfPresent(Bool.self, forKey: .includeRawTranscript) ?? false
+        includeAudio = try values.decodeIfPresent(Bool.self, forKey: .includeAudio) ?? false
+    }
 }
 
 struct SFTPDestinationConfiguration: Codable, Equatable, Sendable {
     var enabled = false
     var host = ""
     var remotePath = ""
+    var includeManifest = false
+    var includeRawTranscript = false
     var includeAudio = false
+
+    private enum CodingKeys: String, CodingKey {
+        case enabled, host, remotePath
+        case includeManifest, includeRawTranscript, includeAudio
+    }
+
+    init(
+        enabled: Bool = false,
+        host: String = "",
+        remotePath: String = "",
+        includeManifest: Bool = false,
+        includeRawTranscript: Bool = false,
+        includeAudio: Bool = false
+    ) {
+        self.enabled = enabled
+        self.host = host
+        self.remotePath = remotePath
+        self.includeManifest = includeManifest
+        self.includeRawTranscript = includeRawTranscript
+        self.includeAudio = includeAudio
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try values.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        host = try values.decodeIfPresent(String.self, forKey: .host) ?? ""
+        remotePath = try values.decodeIfPresent(String.self, forKey: .remotePath) ?? ""
+        includeManifest = try values.decodeIfPresent(Bool.self, forKey: .includeManifest) ?? false
+        includeRawTranscript = try values.decodeIfPresent(Bool.self, forKey: .includeRawTranscript) ?? false
+        includeAudio = try values.decodeIfPresent(Bool.self, forKey: .includeAudio) ?? false
+    }
 }
 
 struct DestinationConfiguration: Codable, Equatable, Sendable {
@@ -126,6 +192,12 @@ struct DestinationConfiguration: Codable, Equatable, Sendable {
     var sftp = SFTPDestinationConfiguration()
 
     var hasEnabledDestination: Bool { git.enabled || sftp.enabled }
+}
+
+struct RetentionConfiguration: Codable, Equatable, Sendable {
+    var deleteSourceTracksAfterTranscription = false
+    var audioRetentionDays: Int?
+    var rawTranscriptRetentionDays: Int?
 }
 
 enum RecordingTriggerKind: String, Codable, Sendable {

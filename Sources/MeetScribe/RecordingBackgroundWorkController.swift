@@ -9,6 +9,7 @@ final class RecordingBackgroundWorkController {
     private var activeTranscriptions: Set<String> = []
     private var activePublications: Set<String> = []
     private var lastTranscriptionFailure: (key: String, message: String)?
+    private var lastPublicationFailure: (key: String, message: String)?
 
     var onRecordingsChanged: (() -> Void)?
 
@@ -85,6 +86,7 @@ final class RecordingBackgroundWorkController {
     func clearError() {
         state.lastError = nil
         lastTranscriptionFailure = nil
+        lastPublicationFailure = nil
     }
 
     func recordTranscriptionFailure(_ description: String, for key: String) {
@@ -186,6 +188,12 @@ final class RecordingBackgroundWorkController {
             result.errorDescription.map { "\(result.destinationID): \($0)" }
         }
         if failures.isEmpty {
+            if let failure = lastPublicationFailure, failure.key == key {
+                lastPublicationFailure = nil
+                if state.lastError == failure.message {
+                    state.lastError = nil
+                }
+            }
             notifier.notify(
                 title: "Recording published",
                 body: "Configured destinations are up to date.",
@@ -199,6 +207,7 @@ final class RecordingBackgroundWorkController {
                 category: "INFO",
                 userInfo: ["notePath": session.noteURL.path])
             state.lastError = warning
+            lastPublicationFailure = (key, warning)
         }
         activePublications.remove(key)
         state.publishingCount = activePublications.count

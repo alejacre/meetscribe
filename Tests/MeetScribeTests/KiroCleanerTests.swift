@@ -50,6 +50,7 @@ final class KiroCleanerTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let executable = root.appendingPathComponent("fake-kiro")
         let argumentsLog = root.appendingPathComponent("arguments.log")
+        let stdinLog = root.appendingPathComponent("stdin.log")
         let environmentLog = root.appendingPathComponent("environment.log")
         let workspaceLog = root.appendingPathComponent("workspace.log")
         let agentLog = root.appendingPathComponent("agent.json")
@@ -68,6 +69,7 @@ final class KiroCleanerTests: XCTestCase {
                 ;;
             esac
             printf '<%s>\\n' "$@" > "\(argumentsLog.path)"
+            cat > "\(stdinLog.path)"
             printf '%s' "${AWS_SECRET_ACCESS_KEY-unset}" > "\(environmentLog.path)"
             pwd > "\(workspaceLog.path)"
             cp "$PWD/.kiro/agents/\(KiroCleaner.agentName).json" "\(agentLog.path)"
@@ -93,7 +95,10 @@ final class KiroCleanerTests: XCTestCase {
         XCTAssertTrue(arguments.contains("<--no-interactive>"))
         XCTAssertTrue(arguments.contains("<--wrap>"))
         XCTAssertTrue(arguments.contains("<never>"))
-        XCTAssertTrue(arguments.contains("Transcript follows:"))
+        XCTAssertFalse(arguments.contains("Transcript follows:"))
+        XCTAssertTrue(
+            try String(contentsOf: stdinLog, encoding: .utf8)
+                .contains("Transcript follows:"))
         XCTAssertEqual(
             try String(contentsOf: environmentLog, encoding: .utf8),
             "unset")
@@ -106,6 +111,14 @@ final class KiroCleanerTests: XCTestCase {
         let workspace = try String(contentsOf: workspaceLog, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         XCTAssertFalse(FileManager.default.fileExists(atPath: workspace))
+    }
+
+    func testConfiguredMissingBinaryFailsExplicitly() {
+        XCTAssertThrowsError(
+            try KiroCleaner.clean(originalTranscript(), binary: "/missing/kiro-cli")
+        ) { error in
+            XCTAssertEqual(error as? KiroCleaner.CleanError, .unavailable)
+        }
     }
 
     func testCleanFailsWhenTemporarySessionCannotBeDeleted() throws {

@@ -12,8 +12,57 @@ struct SettingsView: View {
                 .tabItem { Label("Agent", systemImage: "wand.and.stars") }
             DestinationSettingsPane()
                 .tabItem { Label("Destinations", systemImage: "externaldrive.connected.to.line.below") }
+            PrivacySettingsPane()
+                .tabItem { Label("Privacy", systemImage: "lock.shield") }
         }
         .frame(width: 640, height: 520)
+    }
+}
+
+struct PrivacySettingsPane: View {
+    @State private var settings = Settings()
+    @State private var configuration = RetentionConfiguration()
+
+    var body: some View {
+        Form {
+            Section("Local retention") {
+                Toggle(
+                    "Delete separate microphone and system tracks after transcription",
+                    isOn: $configuration.deleteSourceTracksAfterTranscription)
+                retentionPicker(
+                    "Delete all audio after",
+                    selection: $configuration.audioRetentionDays)
+                retentionPicker(
+                    "Delete raw Whisper JSON after",
+                    selection: $configuration.rawTranscriptRetentionDays)
+                Text(
+                    "Markdown notes and recovery manifests are never deleted automatically. "
+                        + "Retention is disabled until you opt in."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+        .onAppear {
+            configuration = settings.retentionConfiguration
+        }
+        .onChange(of: configuration) { _, value in
+            settings.retentionConfiguration = value
+        }
+    }
+
+    private func retentionPicker(
+        _ title: String,
+        selection: Binding<Int?>
+    ) -> some View {
+        Picker(title, selection: selection) {
+            Text("Keep forever").tag(nil as Int?)
+            Text("7 days").tag(7 as Int?)
+            Text("30 days").tag(30 as Int?)
+            Text("90 days").tag(90 as Int?)
+        }
     }
 }
 

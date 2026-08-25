@@ -71,15 +71,20 @@ enum TranscriptProcessorSupport {
         let originalTokens = originalTurns.flatMap(\.tokens)
         let processedTokens = processedTurns.flatMap(\.tokens)
         guard !originalTokens.isEmpty else { return processedTokens.isEmpty }
-        guard processedTokens.count <= Int(Double(originalTokens.count) * 1.5) + 8 else {
+        guard processedTokens.count <= Int(Double(originalTokens.count) * 1.25) + 8 else {
             return false
         }
-        guard tokenOverlap(originalTokens, processedTokens) * 2 >= originalTokens.count else {
+        guard tokenOverlap(originalTokens, processedTokens) * 100
+            >= originalTokens.count * 85
+        else {
             return false
         }
         return zip(originalTurns, processedTurns).allSatisfy { originalTurn, processedTurn in
-            originalTurn.tokens.isEmpty
-                || tokenOverlap(originalTurn.tokens, processedTurn.tokens) > 0
+            guard !originalTurn.tokens.isEmpty else {
+                return processedTurn.tokens.isEmpty
+            }
+            return tokenOverlap(originalTurn.tokens, processedTurn.tokens) * 100
+                >= originalTurn.tokens.count * 60
         }
     }
 
@@ -132,9 +137,10 @@ enum TranscriptProcessorSupport {
     }
 
     private static func tokens(in text: String) -> [String] {
-        text.lowercased()
+        let removableFillers: Set<String> = ["ah", "eh", "erm", "hmm", "uh", "um"]
+        return text.lowercased()
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty }
+            .filter { !$0.isEmpty && !removableFillers.contains($0) }
     }
 
     private static func tokenOverlap(_ left: [String], _ right: [String]) -> Int {

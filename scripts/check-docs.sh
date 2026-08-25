@@ -2,6 +2,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+test -s Assets/mlx-whisper-constraints.txt
+
 ruby <<'RUBY'
 require "json"
 require "pathname"

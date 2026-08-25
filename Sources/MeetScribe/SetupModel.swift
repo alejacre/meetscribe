@@ -100,6 +100,20 @@ final class SetupModel: ObservableObject {
             .appendingPathComponent("Library/Application Support/MeetScribe/bin", isDirectory: true)
     }
 
+    nonisolated static var engineConstraintsURL: URL? {
+        if let bundled = Bundle.main.url(
+            forResource: "mlx-whisper-constraints",
+            withExtension: "txt")
+        {
+            return bundled
+        }
+        let sourceTree = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("Assets/mlx-whisper-constraints.txt")
+        return FileManager.default.fileExists(atPath: sourceTree.path)
+            ? sourceTree
+            : nil
+    }
+
     init(
         settings: Settings = Settings(),
         dependencies: SetupModelDependencies = .live
@@ -194,6 +208,11 @@ final class SetupModel: ObservableObject {
                 guard let uvPath = uv, dependencies.isExecutable(uvPath) else {
                     self.enginePhase = .failed("Could not install uv."); return
                 }
+                guard let constraints = Self.engineConstraintsURL else {
+                    self.enginePhase = .failed(
+                        "The locked mlx-whisper dependency constraints are missing.")
+                    return
+                }
                 try FileManager.default.createDirectory(
                     at: dependencies.managedToolRoot,
                     withIntermediateDirectories: true)
@@ -203,6 +222,7 @@ final class SetupModel: ObservableObject {
                 try await self.runLogged(
                     uvPath,
                     ["tool", "install", "--force",
+                     "--constraints", constraints.path,
                      "mlx-whisper==\(WhisperModels.mlxWhisperVersion)"],
                     into: \.engineLog,
                     environment: self.managedToolEnvironment)

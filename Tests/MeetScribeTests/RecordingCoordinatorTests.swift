@@ -88,6 +88,32 @@ final class RecordingCoordinatorTests: XCTestCase {
         XCTAssertNil(recorder.targetBundleID)
     }
 
+    func testAskPolicyKeepsActionablePromptUntilMeetingEnds() async throws {
+        let root = try temporaryDirectory("coordinator-meeting-prompt")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (settings, suite) = try makeSettings(root: root)
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let meeting = DetectedMeeting(
+            bundleID: "com.microsoft.teams2",
+            appName: "teams")
+        let detector = MeetingDetector(appDefinitions: {
+            [meeting.bundleID: meeting.appName]
+        })
+        let state = AppState()
+        let coordinator = RecordingCoordinator(
+            state: state,
+            settings: settings,
+            detector: detector,
+            enableSystemIntegrations: false)
+
+        detector.onMeetingStart?(meeting)
+        try await waitUntil { state.pendingMeetingPrompts == [meeting] }
+
+        detector.onMeetingEnd?(meeting)
+        try await waitUntil { state.pendingMeetingPrompts.isEmpty }
+        withExtendedLifetime(coordinator) {}
+    }
+
     func testSuccessfulStopPersistsRecordedStateAndStartsBackgroundWork() async throws {
         let root = try temporaryDirectory("coordinator-stop")
         defer { try? FileManager.default.removeItem(at: root) }

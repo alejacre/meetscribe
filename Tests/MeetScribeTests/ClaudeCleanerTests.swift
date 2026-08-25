@@ -68,6 +68,29 @@ final class ClaudeCleanerTests: XCTestCase {
         XCTAssertFalse(ClaudeCleaner.structurallyValid(original: original, cleaned: cleaned))
     }
 
+    func testStructuralValidationRejectsPartialTranscriptLoss() {
+        let original = transcript("""
+        [00:00:01] **Me:** We reviewed the launch plan customer migration rollback monitoring and ownership.
+        [00:00:02] **Them:** The team confirmed testing documentation support staffing and release timing.
+        """)
+        let cleaned = cleanedTranscript("""
+        [00:00:01] **Me:** We reviewed the launch plan.
+        [00:00:02] **Them:** The team confirmed testing documentation.
+        """)
+
+        XCTAssertFalse(ClaudeCleaner.structurallyValid(original: original, cleaned: cleaned))
+    }
+
+    func testConfiguredMissingBinaryFailsExplicitly() {
+        XCTAssertThrowsError(
+            try ClaudeCleaner.clean(
+                transcript("[00:00:01] **Me:** Hello."),
+                binary: "/missing/claude")
+        ) { error in
+            XCTAssertEqual(error as? ClaudeCleaner.CleanError, .unavailable)
+        }
+    }
+
     func testCleanUsesRestrictedToolFreeInvocation() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("meetscribe-claude-\(UUID().uuidString)", isDirectory: true)

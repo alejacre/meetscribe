@@ -114,25 +114,16 @@ final class RecordingsViewModel: ObservableObject {
 
         matchingRecordingIDs = nil
         isSearching = true
-        let recordings = recordings
-        let documents = documents
+        let root = root
         searchTask = Task {
             do {
                 try await Task.sleep(for: .milliseconds(120))
             } catch {
                 return
             }
-            let worker = Task.detached(priority: .userInitiated) {
-                RecordingSearchFilter.matchingIDs(
-                    query: normalized,
-                    recordings: recordings,
-                    documents: documents)
-            }
-            let matches = await withTaskCancellationHandler {
-                await worker.value
-            } onCancel: {
-                worker.cancel()
-            }
+            let matches = await TranscriptSearch.matchingRecordingIDs(
+                normalized,
+                root: root)
             guard !Task.isCancelled,
                   query.trimmingCharacters(in: .whitespacesAndNewlines) == normalized
             else {
@@ -144,38 +135,24 @@ final class RecordingsViewModel: ObservableObject {
     }
 }
 
-enum RecordingSearchFilter {
-    static func matchingIDs(
-        query: String,
-        recordings: [RecordingRecord],
-        documents: [String: TranscriptDocument]
-    ) -> Set<String> {
-        var matches: Set<String> = []
-        for recording in recordings {
-            guard !Task.isCancelled else { return [] }
-            if recording.basename.localizedCaseInsensitiveContains(query)
-                || documents[recording.id]?.searchableText
-                    .localizedCaseInsensitiveContains(query) == true
-            {
-                matches.insert(recording.id)
-            }
-        }
-        return matches
-    }
-}
-
 struct RecordingsView: View {
     @ObservedObject private var state: AppState
     @StateObject private var model: RecordingsViewModel
     @FocusState private var searchFocused: Bool
     private let rootOverride: URL?
+    private let onRetryTranscription: (URL) -> Void
+    private let onRetryPublication: (URL) -> Void
 
     init(
         state: AppState,
-        root: URL? = nil
+        root: URL? = nil,
+        onRetryTranscription: @escaping (URL) -> Void = { _ in },
+        onRetryPublication: @escaping (URL) -> Void = { _ in }
     ) {
         _state = ObservedObject(wrappedValue: state)
         rootOverride = root
+        self.onRetryTranscription = onRetryTranscription
+        self.onRetryPublication = onRetryPublication
         _model = StateObject(wrappedValue: RecordingsViewModel(
             root: root ?? Settings().outputFolder))
     }
@@ -300,13 +277,21 @@ struct RecordingsView: View {
     private var detail: some View {
         if let record = model.selectedRecording {
             if let document = model.documents[record.id] {
-                TranscriptDetailView(record: record, document: document)
+                TranscriptDetailView(
+                    record: record,
+                    document: document,
+                    onRetryPublication: {
+                        onRetryPublication(record.noteURL)
+                    })
             } else {
                 ContentUnavailableView {
                     Label("Transcript unavailable", systemImage: "waveform.badge.exclamationmark")
                 } description: {
                     Text("The audio is retained locally. Retry transcription from the menu bar.")
                 } actions: {
+                    Button("Retry transcription") {
+                        onRetryTranscription(record.noteURL)
+                    }
                     Button("Show recording in Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([record.assetDir])
                     }
@@ -410,6 +395,7 @@ struct RecordingRow: View {
 struct TranscriptDetailView: View {
     let record: RecordingRecord
     let document: TranscriptDocument
+    var onRetryPublication: () -> Void = {}
 
     var body: some View {
         ScrollView {
@@ -422,6 +408,13 @@ struct TranscriptDetailView: View {
                         .font(.callout)
                         .foregroundStyle(.orange)
                         .textSelection(.enabled)
+                }
+                if record.hasPublicationFailure {
+                    Label(
+                        "One or more exports failed.",
+                        systemImage: "externaldrive.badge.exclamationmark")
+                        .foregroundStyle(.orange)
+                    Button("Retry failed exports", action: onRetryPublication)
                 }
                 Divider()
                 if let summary = document.summary {

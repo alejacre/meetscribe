@@ -2,6 +2,35 @@ import XCTest
 @testable import MeetScribe
 
 final class SettingsTests: XCTestCase {
+    func testDestinationValidationRejectsStaleConfigurationAndCancelledEnable() {
+        let selectedGit = GitDestinationConfiguration(
+            enabled: true,
+            repositoryPath: "/tmp/repository-a")
+        XCTAssertTrue(DestinationValidation.isCurrent(
+            current: GitDestinationConfiguration(
+                repositoryPath: "/tmp/repository-a"),
+            selected: selectedGit,
+            status: .working))
+        XCTAssertFalse(DestinationValidation.isCurrent(
+            current: GitDestinationConfiguration(
+                repositoryPath: "/tmp/repository-b"),
+            selected: selectedGit,
+            status: .working))
+        XCTAssertFalse(DestinationValidation.isCurrent(
+            current: GitDestinationConfiguration(
+                repositoryPath: "/tmp/repository-a"),
+            selected: selectedGit,
+            status: .idle))
+
+        let selectedSFTP = SFTPDestinationConfiguration(
+            enabled: true,
+            host: "archive-a")
+        XCTAssertFalse(DestinationValidation.isCurrent(
+            current: SFTPDestinationConfiguration(host: "archive-b"),
+            selected: selectedSFTP,
+            status: .working))
+    }
+
     private var defaults: UserDefaults!
 
     override func setUp() {
@@ -21,6 +50,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(s.claudeCleanupEnabled)
         XCTAssertFalse(s.screenPermissionRequested)
         XCTAssertTrue(s.mlxWhisperPath.hasSuffix("mlx_whisper"))
+        XCTAssertEqual(s.retentionConfiguration, RetentionConfiguration())
     }
 
     func testPersistence() {
@@ -78,16 +108,24 @@ final class SettingsTests: XCTestCase {
                 enabled: true,
                 repositoryPath: "/tmp/notes",
                 relativePath: "meetings",
+                includeManifest: true,
+                includeRawTranscript: true,
                 includeAudio: false),
             sftp: SFTPDestinationConfiguration(
                 enabled: true,
                 host: "archive",
                 remotePath: "/srv/recordings",
+                includeManifest: true,
                 includeAudio: true))
+        let retention = RetentionConfiguration(
+            deleteSourceTracksAfterTranscription: true,
+            audioRetentionDays: 30,
+            rawTranscriptRetentionDays: 7)
 
         settings.meetingRules = [customRule]
         settings.agentConfiguration = agent
         settings.destinationConfiguration = destinations
+        settings.retentionConfiguration = retention
 
         let reloaded = Settings(defaults: defaults)
         XCTAssertEqual(
@@ -95,6 +133,33 @@ final class SettingsTests: XCTestCase {
             customRule)
         XCTAssertEqual(reloaded.agentConfiguration, agent)
         XCTAssertEqual(reloaded.destinationConfiguration, destinations)
+        XCTAssertEqual(reloaded.retentionConfiguration, retention)
+    }
+
+    func testDestinationConfigurationDecodesLegacyExportDefaults() throws {
+        let data = Data("""
+        {
+          "git": {
+            "enabled": true,
+            "repositoryPath": "/tmp/notes",
+            "relativePath": "meetings",
+            "includeAudio": false
+          },
+          "sftp": {
+            "enabled": false,
+            "host": "",
+            "remotePath": "",
+            "includeAudio": false
+          }
+        }
+        """.utf8)
+
+        let decoded = try JSONDecoder().decode(DestinationConfiguration.self, from: data)
+
+        XCTAssertFalse(decoded.git.includeManifest)
+        XCTAssertFalse(decoded.git.includeRawTranscript)
+        XCTAssertFalse(decoded.sftp.includeManifest)
+        XCTAssertFalse(decoded.sftp.includeRawTranscript)
     }
 
     func testConfigurationLabelsMergingAndDestinationState() {

@@ -86,12 +86,56 @@ enum Subprocess {
         return env
     }
 
+    static var destinationEnvironment: [String: String] {
+        var env = restrictedEnvironment
+        for key in ["SSH_AUTH_SOCK", "SSH_AGENT_PID", "GIT_CONFIG_GLOBAL", "GIT_SSH_COMMAND"] {
+            if let value = ProcessInfo.processInfo.environment[key] {
+                env[key] = value
+            }
+        }
+        return env
+    }
+
     static func signalProcessTree(_ process: Process, _ signal: Int32) {
         let pid = process.processIdentifier
         guard pid > 0 else { return }
-        if kill(-pid, signal) != 0 {
-            kill(pid, signal)
+        for descendant in descendantProcessIDs(of: pid).reversed() {
+            kill(descendant, signal)
         }
+        kill(pid, signal)
+    }
+
+    private static func descendantProcessIDs(of root: pid_t) -> [pid_t] {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps")
+        process.arguments = ["-axo", "pid=,ppid="]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return [] }
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return [] }
+        let output = String(
+            data: pipe.fileHandleForReading.readDataToEndOfFile(),
+            encoding: .utf8) ?? ""
+        var children: [pid_t: [pid_t]] = [:]
+        for line in output.split(separator: "\n") {
+            let columns = line.split(whereSeparator: \.isWhitespace)
+            guard columns.count == 2,
+                  let pid = pid_t(columns[0]),
+                  let parent = pid_t(columns[1])
+            else {
+                continue
+            }
+            children[parent, default: []].append(pid)
+        }
+        var result: [pid_t] = []
+        var pending = children[root] ?? []
+        while let pid = pending.popLast() {
+            result.append(pid)
+            pending.append(contentsOf: children[pid] ?? [])
+        }
+        return result
     }
 
     @discardableResult

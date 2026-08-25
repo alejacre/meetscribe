@@ -56,4 +56,30 @@ final class SubprocessTests: XCTestCase {
         XCTAssertEqual(out.trimmingCharacters(in: .whitespacesAndNewlines), "done")
         XCTAssertLessThan(Date().timeIntervalSince(started), 3)
     }
+
+    func testTimeoutTerminatesDescendants() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meetscribe-process-tree-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let pidFile = root.appendingPathComponent("child.pid")
+
+        XCTAssertThrowsError(try Subprocess.run(
+            "/bin/sh",
+            ["-c", "sleep 60 & child=$!; echo $child > \(pidFile.path); wait"],
+            timeout: 0.2))
+        let child = try XCTUnwrap(
+            Int32(
+                String(contentsOf: pidFile, encoding: .utf8)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)))
+
+        XCTAssertEqual(kill(child, 0), -1)
+    }
+
+    func testDestinationEnvironmentDoesNotExposeUnrelatedSecrets() {
+        setenv("AWS_SECRET_ACCESS_KEY", "must-not-leak", 1)
+        defer { unsetenv("AWS_SECRET_ACCESS_KEY") }
+
+        XCTAssertNil(Subprocess.destinationEnvironment["AWS_SECRET_ACCESS_KEY"])
+    }
 }

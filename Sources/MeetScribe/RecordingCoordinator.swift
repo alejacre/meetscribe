@@ -82,6 +82,9 @@ final class RecordingCoordinator: ObservableObject {
                 case .ignore:
                     break
                 case .ask:
+                    if !self.state.pendingMeetingPrompts.contains(meeting) {
+                        self.state.pendingMeetingPrompts.append(meeting)
+                    }
                     self.notifier.notify(
                         title: "Meeting detected: \(meeting.appName)",
                         body: "Want to record it?",
@@ -100,6 +103,7 @@ final class RecordingCoordinator: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 self.detectedMeetings.removeValue(forKey: meeting.bundleID)
+                self.state.pendingMeetingPrompts.removeAll { $0.bundleID == meeting.bundleID }
                 guard self.session?.sourceBundleID == meeting.bundleID,
                       self.state.phase == .starting || self.state.phase == .recording
                 else { return }
@@ -147,6 +151,9 @@ final class RecordingCoordinator: ObservableObject {
         meeting: DetectedMeeting? = nil
     ) async {
         guard case .idle = state.phase else { return }
+        if let meeting {
+            state.pendingMeetingPrompts.removeAll { $0.bundleID == meeting.bundleID }
+        }
         state.phase = .starting
         stopRequestedDuringStart = false
         let s = RecordingSession(
@@ -207,7 +214,7 @@ final class RecordingCoordinator: ObservableObject {
                 || error.localizedDescription.localizedCaseInsensitiveContains("permission")
                 || error.localizedDescription.contains("No display found")
             notifier.notify(title: "Recording failed to start",
-                            body: error.localizedDescription, category: "MEETING_START")
+                            body: error.localizedDescription, category: "INFO")
         }
     }
 
@@ -259,7 +266,8 @@ final class RecordingCoordinator: ObservableObject {
             configuration: RecordingTranscriptionConfiguration(
                 mlxWhisperPath: settings.mlxWhisperPath,
                 whisperModel: settings.whisperModel,
-                agentConfiguration: settings.agentConfiguration),
+                agentConfiguration: settings.agentConfiguration,
+                retentionConfiguration: settings.retentionConfiguration),
             destinationConfiguration: settings.destinationConfiguration)
     }
 
@@ -346,8 +354,13 @@ final class RecordingCoordinator: ObservableObject {
 
     func refreshRecent() {
         do {
-            state.recentRecordings = try RecordingLibrary.recordings(
-                root: settings.outputFolder)
+            let recordings = try RecordingLibrary.recordings(
+                root: settings.outputFolder,
+                limit: nil)
+            try RetentionService.applyAgePolicies(
+                recordings: recordings,
+                configuration: settings.retentionConfiguration)
+            state.recentRecordings = Array(recordings.prefix(5))
         } catch {
             let recoveryError = "Could not recover recordings: \(error.localizedDescription)"
             if let currentError = state.lastError,

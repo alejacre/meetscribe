@@ -99,10 +99,9 @@ The Kiro adapter invokes the local CLI in non-interactive mode with:
 - Output framing and ANSI control sequences removed before validation
 - The temporary local Kiro session deleted after each attempt
 
-Kiro CLI does not consume the transcript from stdin, so MeetScribe includes it
-in the initial non-interactive request. Very large transcripts are therefore
-subject to the operating system's command-argument size limit. Authentication
-and model selection remain owned by the user's Kiro installation.
+MeetScribe delivers the request and complete transcript over stdin so sensitive
+meeting content does not appear in process arguments. Authentication and model
+selection remain owned by the user's Kiro installation.
 
 As with every adapter, MeetScribe rejects incomplete or structurally unsafe
 output and retains the raw local transcript.

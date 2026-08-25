@@ -33,9 +33,13 @@ struct SetupView: View {
                 Circle()
                     .fill(s.rawValue <= model.step.rawValue ? Color.accentColor : Color.secondary.opacity(0.3))
                     .frame(width: 8, height: 8)
+                    .accessibilityHidden(true)
             }
             Spacer()
-            Text(model.step.title).font(.headline)
+            Text(model.step.title)
+                .font(.headline)
+                .accessibilityLabel(
+                    "Step \(model.step.rawValue + 1) of \(SetupStep.allCases.count): \(model.step.title)")
         }
         .padding(.horizontal, 24).padding(.vertical, 14)
     }

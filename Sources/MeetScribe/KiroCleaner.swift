@@ -10,12 +10,15 @@ enum KiroCleaner {
     }
 
     enum CleanError: Error, LocalizedError {
+        case unavailable
         case missingTopic
         case invalidOutput
         case sessionCleanupFailed
 
         var errorDescription: String? {
             switch self {
+            case .unavailable:
+                "Kiro CLI is configured, but the `kiro-cli` executable is unavailable"
             case .missingTopic:
                 "Kiro returned a transcript without the required topic name"
             case .invalidOutput:
@@ -27,7 +30,11 @@ enum KiroCleaner {
     }
 
     static func clean(_ markdown: String, binary: String? = nil) throws -> Result? {
-        guard let bin = binary ?? ToolFinder.findTool("kiro-cli") else { return nil }
+        guard let bin = binary ?? ToolFinder.findTool("kiro-cli"),
+              FileManager.default.isExecutableFile(atPath: bin)
+        else {
+            throw CleanError.unavailable
+        }
         let workspace = FileManager.default.temporaryDirectory
             .appendingPathComponent(
                 "meetscribe-kiro-\(UUID().uuidString.lowercased())",
@@ -48,8 +55,8 @@ enum KiroCleaner {
                     "--agent", agentName,
                     "--no-interactive",
                     "--wrap", "never",
-                    request,
                 ],
+                stdin: request,
                 timeout: TranscriptProcessorSupport.timeout(for: markdown),
                 environment: environment,
                 currentDirectory: workspace)

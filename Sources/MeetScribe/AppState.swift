@@ -17,6 +17,7 @@ final class AppState: ObservableObject {
     @Published var showPermissionHelp: Bool = false
     @Published var isQuitting: Bool = false
     @Published var recentRecordings: [RecordingRecord] = []
+    @Published var pendingMeetingPrompts: [DetectedMeeting] = []
     @Published var recordingBrowserSelection: URL?
     @Published var recordingBrowserSearchRequested = false
 }

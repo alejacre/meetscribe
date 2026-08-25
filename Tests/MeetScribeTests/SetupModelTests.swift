@@ -50,6 +50,11 @@ final class SetupModelTests: XCTestCase {
         XCTAssertFalse(SetupModel.isPinnedEngineList("mlx-whisper v0.5.0"))
     }
 
+    func testEngineDependencyConstraintsAreAvailable() throws {
+        let constraints = try XCTUnwrap(SetupModel.engineConstraintsURL)
+        XCTAssertFalse(try String(contentsOf: constraints, encoding: .utf8).isEmpty)
+    }
+
     func testAppendLogCarriageReturnRewritesLastLine() {
         var log = ""
         log = SetupModel.appendLog(log, chunk: "line one\n")

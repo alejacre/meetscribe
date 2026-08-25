@@ -4,6 +4,19 @@ struct RecordingTranscriptionConfiguration: Sendable {
     let mlxWhisperPath: String
     let whisperModel: String
     let agentConfiguration: AgentConfiguration
+    let retentionConfiguration: RetentionConfiguration
+
+    init(
+        mlxWhisperPath: String,
+        whisperModel: String,
+        agentConfiguration: AgentConfiguration,
+        retentionConfiguration: RetentionConfiguration = RetentionConfiguration()
+    ) {
+        self.mlxWhisperPath = mlxWhisperPath
+        self.whisperModel = whisperModel
+        self.agentConfiguration = agentConfiguration
+        self.retentionConfiguration = retentionConfiguration
+    }
 }
 
 struct RecordingTranscriptionResult: Sendable {
@@ -120,6 +133,16 @@ enum RecordingTranscriptionService {
                 completedAt: Date(),
                 model: configuration.whisperModel,
                 processorID: processorID)
+        }
+        do {
+            try RetentionService.applyPostTranscription(
+                session: finalSession,
+                configuration: configuration.retentionConfiguration)
+        } catch {
+            let retentionWarning = "Retention cleanup failed: \(error.localizedDescription)"
+            processingWarning = [processingWarning, retentionWarning]
+                .compactMap { $0 }
+                .joined(separator: " ")
         }
         return RecordingTranscriptionResult(
             finalSession: finalSession,

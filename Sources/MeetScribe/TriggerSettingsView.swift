@@ -43,6 +43,8 @@ struct TriggerSettingsPane: View {
                                     Image(systemName: "minus.circle")
                                 }
                                 .buttonStyle(.borderless)
+                                .accessibilityLabel(
+                                    "Remove \(rules[index].displayName)")
                                 .help("Remove application")
                             }
                         }

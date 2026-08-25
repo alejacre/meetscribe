@@ -131,6 +131,7 @@ final class PublicationServiceTests: XCTestCase {
         let displayName = "Corrupting destination"
         let configurationFingerprint = "test"
         let includeAudio = false
+        let includeManifest = true
 
         func validateConnection() throws {}
 

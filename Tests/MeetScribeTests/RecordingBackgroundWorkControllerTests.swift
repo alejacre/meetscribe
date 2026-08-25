@@ -148,6 +148,38 @@ final class RecordingBackgroundWorkControllerTests: XCTestCase {
         XCTAssertNil(state.lastError)
     }
 
+    func testSuccessfulPublicationRetryClearsMatchingFailure() async throws {
+        let root = try temporaryDirectory("background-publication-retry")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = try populatedSession(root: root)
+        let attempts = LockedCounter()
+        let state = AppState()
+        let notifier = Notifier()
+        notifier.isEnabled = false
+        let controller = RecordingBackgroundWorkController(
+            state: state,
+            notifier: notifier,
+            transcriptionRunner: .init { _, _ in
+                throw TestError.transcription
+            },
+            publicationRunner: .init { _, _ in
+                attempts.increment()
+                return [PublicationResult(
+                    destinationID: "archive",
+                    errorDescription: attempts.value == 1 ? "offline" : nil)]
+            })
+        var destinations = DestinationConfiguration()
+        destinations.sftp.enabled = true
+
+        controller.publish(session: session, configuration: destinations)
+        try await waitUntil { state.publishingCount == 0 && attempts.value == 1 }
+        XCTAssertNotNil(state.lastError)
+
+        controller.publish(session: session, configuration: destinations)
+        try await waitUntil { state.publishingCount == 0 && attempts.value == 2 }
+        XCTAssertNil(state.lastError)
+    }
+
     private func populatedSession(root: URL) throws -> RecordingSession {
         let session = RecordingSession(
             root: root,

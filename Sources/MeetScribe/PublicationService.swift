@@ -85,6 +85,8 @@ enum PublicationService {
                 }
                 let package = try RecordingExportPackage(
                     session: session,
+                    includeManifest: destination.includeManifest,
+                    includeRawTranscript: destination.includeRawTranscript,
                     includeAudio: destination.includeAudio)
                 try destination.publish(package)
                 try RecordingManifestStore.update(at: session.manifestURL) { manifest in

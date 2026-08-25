@@ -90,6 +90,31 @@ actor TranscriptSearchIndex {
         return hits
     }
 
+    func matchingRecordingIDs(_ query: String, root: URL) -> Set<String> {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedQuery.isEmpty, !Task.isCancelled else { return [] }
+
+        let notes = TranscriptSearch.managedNotes(root: root)
+        refreshEntries(for: notes, root: root)
+        let rootKey = root.standardizedFileURL.path
+        let entries = entriesByRoot[rootKey] ?? [:]
+        var matches: Set<String> = []
+        for markdown in notes {
+            guard !Task.isCancelled else { return [] }
+            let path = markdown.standardizedFileURL.path
+            let filenameMatches = markdown.deletingPathExtension().lastPathComponent
+                .localizedCaseInsensitiveContains(normalizedQuery)
+            guard filenameMatches || entries[path]?.lines.contains(where: {
+                $0.localizedCaseInsensitiveContains(normalizedQuery)
+            }) == true
+            else {
+                continue
+            }
+            matches.insert(RecordingSession(existingNote: markdown).assetDir.standardizedFileURL.path)
+        }
+        return matches
+    }
+
     func remove(root: URL) {
         entriesByRoot.removeValue(forKey: root.standardizedFileURL.path)
     }
@@ -104,11 +129,33 @@ actor TranscriptSearchIndex {
             modifiedAt: values.contentModificationDate,
             fileSize: values.fileSize)
     }
+
+    private func refreshEntries(for notes: [URL], root: URL) {
+        let rootKey = root.standardizedFileURL.path
+        let activePaths = Set(notes.map { $0.standardizedFileURL.path })
+        var entries = entriesByRoot[rootKey] ?? [:]
+        entries = entries.filter { activePaths.contains($0.key) }
+        for markdown in notes {
+            guard !Task.isCancelled else { return }
+            let path = markdown.standardizedFileURL.path
+            guard let signature = Self.signature(for: markdown) else { continue }
+            if entries[path]?.signature == signature { continue }
+            guard let text = try? loader.load(markdown) else { continue }
+            entries[path] = IndexedTranscript(
+                signature: signature,
+                lines: text.split(separator: "\n").map(String.init))
+        }
+        entriesByRoot[rootKey] = entries
+    }
 }
 
 enum TranscriptSearch {
     static func search(_ query: String, root: URL) async -> [SearchHit] {
         await TranscriptSearchIndex.shared.search(query, root: root)
+    }
+
+    static func matchingRecordingIDs(_ query: String, root: URL) async -> Set<String> {
+        await TranscriptSearchIndex.shared.matchingRecordingIDs(query, root: root)
     }
 
     fileprivate static func managedNotes(root: URL) -> [URL] {
