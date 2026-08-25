@@ -80,6 +80,7 @@ enum MeetingApps {
 enum AgentProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case disabled
     case claudeCode
+    case kiroCLI
     case customCommand
 
     var id: String { rawValue }
@@ -88,6 +89,7 @@ enum AgentProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .disabled: "None"
         case .claudeCode: "Claude Code"
+        case .kiroCLI: "Kiro CLI"
         case .customCommand: "Custom command"
         }
     }
@@ -102,6 +104,7 @@ struct AgentConfiguration: Codable, Equatable, Sendable {
 
     static let disabled = AgentConfiguration()
     static let claudeCode = AgentConfiguration(provider: .claudeCode)
+    static let kiroCLI = AgentConfiguration(provider: .kiroCLI)
 }
 
 struct GitDestinationConfiguration: Codable, Equatable, Sendable {

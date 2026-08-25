@@ -62,10 +62,12 @@ enum Subprocess {
     /// Apps launched from Finder get a minimal PATH; tools like mlx_whisper
     /// shell out to ffmpeg and need Homebrew/user paths visible.
     static func makeProcess(_ executable: String, _ args: [String],
-                            environment: [String: String]? = nil) -> Process {
+                            environment: [String: String]? = nil,
+                            currentDirectory: URL? = nil) -> Process {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: executable)
         p.arguments = args
+        p.currentDirectoryURL = currentDirectory
         var env = environment ?? ProcessInfo.processInfo.environment
         let extra = ["/opt/homebrew/bin", "/usr/local/bin", NSHomeDirectory() + "/.local/bin"]
         env["PATH"] = (extra + [(env["PATH"] ?? "/usr/bin:/bin")]).joined(separator: ":")
@@ -95,9 +97,14 @@ enum Subprocess {
     @discardableResult
     static func run(_ executable: String, _ args: [String], stdin: String? = nil,
                     timeout: TimeInterval = 1800,
-                    environment: [String: String]? = nil) throws -> String {
+                    environment: [String: String]? = nil,
+                    currentDirectory: URL? = nil) throws -> String {
         _ = ignoreSigpipe
-        let p = makeProcess(executable, args, environment: environment)
+        let p = makeProcess(
+            executable,
+            args,
+            environment: environment,
+            currentDirectory: currentDirectory)
         let out = Pipe(), err = Pipe()
         p.standardOutput = out
         p.standardError = err

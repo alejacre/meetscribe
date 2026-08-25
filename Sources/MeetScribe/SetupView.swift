@@ -191,17 +191,61 @@ struct SetupView: View {
     private var cleanupStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(
-                "Claude Code is the built-in transcript agent. Enabling it sends the complete transcript "
-                    + "to the service configured by your Claude CLI. Tools and session persistence are disabled."
+                "Optionally process transcripts with Claude Code or Kiro CLI. The complete transcript "
+                    + "is sent to the service configured by the selected local CLI."
             )
                 .foregroundStyle(.secondary)
-            switch model.claudeFound {
-            case .some(true): Label("Claude CLI found", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-            case .some(false): Label("Claude CLI not found (cleanup will be skipped)", systemImage: "info.circle").foregroundStyle(.secondary)
-            case .none: EmptyView()
+            HStack(spacing: 18) {
+                toolStatus(name: "Claude", found: model.claudeFound)
+                toolStatus(name: "Kiro", found: model.kiroFound)
             }
-            Toggle("Process transcripts with Claude Code", isOn: Binding(
-                get: { model.claudeEnabled }, set: { model.setClaudeEnabled($0) }))
+            Picker("Transcript agent", selection: Binding(
+                get: { model.agentProvider },
+                set: { model.setAgentProvider($0) }))
+            {
+                Text(AgentProviderKind.disabled.displayName)
+                    .tag(AgentProviderKind.disabled)
+                Text(AgentProviderKind.claudeCode.displayName)
+                    .tag(AgentProviderKind.claudeCode)
+                    .disabled(model.claudeFound == false)
+                Text(AgentProviderKind.kiroCLI.displayName)
+                    .tag(AgentProviderKind.kiroCLI)
+                    .disabled(model.kiroFound == false)
+                if model.agentProvider == .customCommand {
+                    Text(AgentProviderKind.customCommand.displayName)
+                        .tag(AgentProviderKind.customCommand)
+                }
+            }
+            cleanupProviderDescription
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private var cleanupProviderDescription: Text {
+        switch model.agentProvider {
+        case .disabled:
+            Text("No agent is used; the local Whisper transcript is kept unchanged.")
+        case .claudeCode:
+            Text("Claude runs with the Haiku model, tools and session persistence disabled.")
+        case .kiroCLI:
+            Text("Kiro runs without tools; MeetScribe deletes its temporary local session afterward.")
+        case .customCommand:
+            Text("The custom command remains configured. Edit it later in Settings > Agent.")
+        }
+    }
+
+    @ViewBuilder
+    private func toolStatus(name: String, found: Bool?) -> some View {
+        switch found {
+        case .some(true):
+            Label("\(name) found", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .some(false):
+            Label("\(name) not found", systemImage: "info.circle")
+                .foregroundStyle(.secondary)
+        case .none:
+            EmptyView()
         }
     }
 

@@ -116,6 +116,7 @@ final class ClaudeCleanerTests: XCTestCase {
         XCTAssertEqual(result.topicSlug, "planning")
         XCTAssertTrue(result.markdown.contains("## Summary"))
         let args = try String(contentsOf: argsLog, encoding: .utf8)
+        XCTAssertTrue(args.contains("--model\n\(ClaudeCleaner.model)\n"))
         XCTAssertTrue(args.contains("--tools\n\n"))
         XCTAssertTrue(args.contains("--strict-mcp-config"))
         XCTAssertTrue(args.contains("--no-session-persistence"))
@@ -147,6 +148,24 @@ final class ClaudeCleanerTests: XCTestCase {
                 return XCTFail("unexpected error: \(error)")
             }
         }
+    }
+
+    func testLiveClaudeHaikuSmokeWhenRequested() throws {
+        guard ProcessInfo.processInfo.environment["MEETSCRIBE_LIVE_CLAUDE"] == "1" else {
+            throw XCTSkip("Set MEETSCRIBE_LIVE_CLAUDE=1 to run the authenticated Claude smoke test.")
+        }
+
+        let result = try XCTUnwrap(ClaudeCleaner.clean(
+            transcript(
+                """
+                [00:00:01] **Me:** um hello everyone
+                [00:00:04] **Them:** hi we should review the test plan
+                """)))
+
+        XCTAssertFalse(result.topicSlug.isEmpty)
+        XCTAssertTrue(result.markdown.contains("## Summary"))
+        XCTAssertTrue(result.markdown.contains("[00:00:01] **Me:**"))
+        XCTAssertTrue(result.markdown.contains("[00:00:04] **Them:**"))
     }
 
     private func transcript(_ body: String) -> String {

@@ -1,6 +1,7 @@
 # Transcript Agent Adapters
 
-MeetScribe supports a built-in Claude Code adapter and a provider-neutral custom command.
+MeetScribe supports built-in Claude Code and Kiro CLI adapters, plus a
+provider-neutral custom command.
 
 ## Custom Command Contract
 
@@ -80,9 +81,28 @@ Use an absolute executable path and avoid wrapper scripts when the target CLI ca
 
 The Claude Code adapter invokes the local CLI in print mode with:
 
+- The `haiku` model alias
 - Tools disabled
 - Strict empty MCP configuration
 - Session persistence disabled
 - Restricted environment variables
 
 Authentication and service selection remain owned by the user's Claude Code installation. Enabling the adapter sends the complete transcript to that configured service.
+
+## Built-in Kiro CLI Adapter
+
+The Kiro adapter invokes the local CLI in non-interactive mode with:
+
+- A temporary workspace-scoped agent
+- No tools or MCP servers in that agent
+- Restricted environment variables
+- Output framing and ANSI control sequences removed before validation
+- The temporary local Kiro session deleted after each attempt
+
+Kiro CLI does not consume the transcript from stdin, so MeetScribe includes it
+in the initial non-interactive request. Very large transcripts are therefore
+subject to the operating system's command-argument size limit. Authentication
+and model selection remain owned by the user's Kiro installation.
+
+As with every adapter, MeetScribe rejects incomplete or structurally unsafe
+output and retains the raw local transcript.

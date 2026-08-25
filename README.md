@@ -31,7 +31,7 @@ export remain disabled until you configure them.
 | Principle | What it means |
 | --- | --- |
 | **Local first** | Capture and transcription run on your Mac. No MeetScribe account or hosted transcript service. |
-| **Agent agnostic** | Use no agent, the built-in Claude Code adapter, or any executable that follows the Markdown stdin/stdout contract. |
+| **Agent agnostic** | Use no agent, Claude Code, Kiro CLI, or any executable that follows the Markdown stdin/stdout contract. |
 | **Storage you control** | Keep notes in a normal folder, commit them to Git, or upload over SFTP using OpenSSH. |
 | **Recoverable** | Versioned manifests preserve recording identity and retry state across failures and restarts. |
 | **Inspectable** | The primary artifact is readable Markdown, with machine state stored in a private sidecar directory. |
@@ -45,7 +45,7 @@ flowchart LR
     C --> D[Markdown note]
     D --> E{Transcript agent enabled?}
     E -- No --> F[Final local note]
-    E -- Yes --> G[Claude Code or custom CLI]
+    E -- Yes --> G[Claude Code, Kiro CLI, or custom CLI]
     G --> F
     F --> H{Destination enabled?}
     H -- No --> I[Done]
@@ -69,7 +69,8 @@ flowchart LR
   the `Option+Shift+R` global shortcut.
 - Separate microphone and meeting-audio capture through ScreenCaptureKit.
 - Locked and verified MLX Whisper model revisions for Apple Silicon.
-- Claude Code adapter with tools and session persistence disabled.
+- Claude Code adapter pinned to Haiku, with tools and session persistence disabled.
+- Kiro CLI adapter with a temporary tool-free agent and automatic session cleanup.
 - Generic command adapter with literal arguments, restricted environment, and
   structural output validation.
 - Git publication with clean-worktree checks, scoped commits, and upstream push.
@@ -99,7 +100,7 @@ explicitly to install the app.
 
 The first-run assistant installs the pinned transcription engine through your
 existing `uv`, verifies and downloads a locked model, requests macOS permissions,
-selects an output folder, and offers explicit opt-in to Claude Code.
+selects an output folder, and offers explicit opt-in to Claude Code or Kiro CLI.
 
 ## Configure
 
@@ -116,7 +117,8 @@ Open **Settings > Triggers**:
 Open **Settings > Agent**:
 
 - **None** keeps local Whisper output unchanged.
-- **Claude Code** runs the local `claude` CLI with tools and persistence disabled.
+- **Claude Code** runs the local `claude` CLI with Haiku, tools and persistence disabled.
+- **Kiro CLI** runs a temporary tool-free agent and deletes its local session afterward.
 - **Custom command** runs any absolute executable without a shell.
 
 The custom adapter receives Markdown on stdin and returns validated MeetScribe

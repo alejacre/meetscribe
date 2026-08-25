@@ -11,6 +11,10 @@ protocol TranscriptProcessing: Sendable {
 }
 
 enum TranscriptProcessorSupport {
+    static let standardTimeout: TimeInterval = 300
+    static let longTranscriptTimeout: TimeInterval = 900
+    static let longTranscriptThreshold = 50_000
+
     static let defaultPrompt = """
         You are a transcript editor. Clean up the meeting transcript below: fix punctuation and casing, \
         remove filler words and false starts, and merge fragments into coherent paragraphs. STRICT RULES: \
@@ -22,6 +26,12 @@ enum TranscriptProcessorSupport {
         Insert a ## Summary section of 2-4 sentences after the frontmatter, followed by ## Transcript and \
         the complete cleaned transcript. Output only Markdown.
         """
+
+    static func timeout(for markdown: String) -> TimeInterval {
+        markdown.utf8.count >= longTranscriptThreshold
+            ? longTranscriptTimeout
+            : standardTimeout
+    }
 
     static func extractTopic(_ text: String) -> (String?, String) {
         var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
@@ -149,6 +159,17 @@ struct ClaudeCodeTranscriptProcessor: TranscriptProcessing {
     }
 }
 
+struct KiroCLITranscriptProcessor: TranscriptProcessing {
+    let id = "kiro-cli"
+
+    func process(_ markdown: String) throws -> TranscriptProcessingResult? {
+        guard let result = try KiroCleaner.clean(markdown) else { return nil }
+        return TranscriptProcessingResult(
+            markdown: result.markdown,
+            topicSlug: result.topicSlug)
+    }
+}
+
 struct CommandTranscriptProcessor: TranscriptProcessing {
     let id = "custom-command"
     let configuration: AgentConfiguration
@@ -194,7 +215,7 @@ struct CommandTranscriptProcessor: TranscriptProcessing {
             executable,
             arguments,
             stdin: markdown,
-            timeout: 300,
+            timeout: TranscriptProcessorSupport.timeout(for: markdown),
             environment: configuration.inheritEnvironment
                 ? ProcessInfo.processInfo.environment
                 : Subprocess.restrictedEnvironment)
@@ -216,6 +237,8 @@ enum TranscriptProcessorFactory {
             nil
         case .claudeCode:
             ClaudeCodeTranscriptProcessor()
+        case .kiroCLI:
+            KiroCLITranscriptProcessor()
         case .customCommand:
             CommandTranscriptProcessor(configuration: configuration)
         }

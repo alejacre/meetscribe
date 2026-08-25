@@ -2,6 +2,15 @@ import XCTest
 @testable import MeetScribe
 
 final class TranscriptProcessorTests: XCTestCase {
+    func testLongTranscriptsReceiveExtendedProcessingTimeout() {
+        XCTAssertEqual(
+            TranscriptProcessorSupport.timeout(for: String(repeating: "a", count: 1_000)),
+            300)
+        XCTAssertEqual(
+            TranscriptProcessorSupport.timeout(for: String(repeating: "a", count: 50_000)),
+            900)
+    }
+
     func testCustomCommandReceivesLiteralArgumentsAndRestrictedEnvironment() throws {
         let root = try temporaryDirectory("processor")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -97,6 +106,9 @@ final class TranscriptProcessorTests: XCTestCase {
         XCTAssertEqual(
             TranscriptProcessorFactory.make(configuration: .claudeCode)?.id,
             "claude-code")
+        XCTAssertEqual(
+            TranscriptProcessorFactory.make(configuration: .kiroCLI)?.id,
+            "kiro-cli")
         var custom = AgentConfiguration.disabled
         custom.provider = .customCommand
         custom.customExecutable = "/bin/cat"

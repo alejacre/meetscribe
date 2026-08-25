@@ -54,7 +54,7 @@ and performs matching away from the main actor with cancellation between lines.
 ### Transcript Agent
 
 `TranscriptProcessing` accepts Markdown and returns processed Markdown plus a
-required, bounded topic slug. The built-in Claude Code and custom-command
+required, bounded topic slug. The built-in Claude Code, Kiro CLI, and custom-command
 implementations share validation for structure, turn identity, and bounded
 source-token preservation.
 

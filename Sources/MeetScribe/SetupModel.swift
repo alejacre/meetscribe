@@ -83,7 +83,8 @@ final class SetupModel: ObservableObject {
     // Output + cleanup
     @Published var outputPath: String
     @Published var claudeFound: Bool?        // nil = not yet checked
-    @Published var claudeEnabled: Bool
+    @Published var kiroFound: Bool?          // nil = not yet checked
+    @Published var agentProvider: AgentProviderKind
 
     private var settings: Settings
     private let dependencies: SetupModelDependencies
@@ -110,7 +111,7 @@ final class SetupModel: ObservableObject {
             at: settings.outputFolder,
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: NSNumber(value: Int16(0o700))])
-        claudeEnabled = settings.claudeCleanupEnabled
+        agentProvider = settings.agentConfiguration.provider
         selectedModel = settings.whisperModel
     }
 
@@ -125,7 +126,7 @@ final class SetupModel: ObservableObject {
     /// Kicks off the cheap checks that don't need user action.
     func beginChecks() {
         Task { await checkEngine() }
-        Task { await checkClaude() }
+        Task { await checkAgents() }
     }
 
     func cancelWork() { workTask?.cancel(); workTask = nil }
@@ -139,7 +140,7 @@ final class SetupModel: ObservableObject {
         case .engine: Task { await checkEngine() }
         case .model: checkModel()
         case .permissions: Task { await refreshPermissions() }
-        case .cleanup: Task { await checkClaude() }
+        case .cleanup: Task { await checkAgents() }
         default: break
         }
     }
@@ -310,16 +311,23 @@ final class SetupModel: ObservableObject {
         settings.outputFolder = url
     }
 
-    func checkClaude() async {
+    func checkAgents() async {
         let dependencies = dependencies
-        claudeFound = await Task.detached(priority: .utility) {
+        async let claude = Task.detached(priority: .utility) {
             dependencies.findTool("claude") != nil
         }.value
+        async let kiro = Task.detached(priority: .utility) {
+            dependencies.findTool("kiro-cli") != nil
+        }.value
+        claudeFound = await claude
+        kiroFound = await kiro
     }
 
-    func setClaudeEnabled(_ on: Bool) {
-        claudeEnabled = on
-        settings.claudeCleanupEnabled = on
+    func setAgentProvider(_ provider: AgentProviderKind) {
+        agentProvider = provider
+        var configuration = settings.agentConfiguration
+        configuration.provider = provider
+        settings.agentConfiguration = configuration
     }
 
     var requiredSetupComplete: Bool {

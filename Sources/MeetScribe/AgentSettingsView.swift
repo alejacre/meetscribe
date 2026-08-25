@@ -35,8 +35,16 @@ struct AgentSettingsPane: View {
                         .foregroundStyle(.secondary)
                 case .claudeCode:
                     Text(
-                        "Uses the local Claude Code CLI with tools and session persistence disabled. "
+                        "Uses the local Claude Code CLI with the Haiku model, tools and session "
+                            + "persistence disabled. "
                             + "The complete transcript is sent to the service configured by that CLI."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                case .kiroCLI:
+                    Text(
+                        "Uses a temporary, tool-free Kiro CLI agent. MeetScribe validates the output "
+                            + "and deletes the temporary local Kiro session after processing."
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)

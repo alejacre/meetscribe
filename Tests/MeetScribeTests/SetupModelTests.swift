@@ -78,6 +78,25 @@ final class SetupModelTests: XCTestCase {
             ])
     }
 
+    func testSetupPreservesAndCanChangeCustomAgentProvider() throws {
+        var settings = try makeSettings("custom-agent-provider")
+        settings.agentConfiguration = AgentConfiguration(
+            provider: .customCommand,
+            customExecutable: "/tmp/transcript-agent",
+            customArguments: ["--prompt", "{prompt}"],
+            customPrompt: "Clean this transcript")
+        let model = SetupModel(settings: settings)
+
+        XCTAssertEqual(model.agentProvider, .customCommand)
+        model.setAgentProvider(.kiroCLI)
+
+        XCTAssertEqual(model.agentProvider, .kiroCLI)
+        XCTAssertEqual(settings.agentConfiguration.provider, .kiroCLI)
+        XCTAssertEqual(
+            settings.agentConfiguration.customExecutable,
+            "/tmp/transcript-agent")
+    }
+
     func testCheckEngineAcceptsConfiguredAndPinnedDiscoveredTools() async throws {
         let harness = Harness(root: try temporaryDirectory("check-engine"))
         var settings = try makeSettings("check-engine")
@@ -226,19 +245,24 @@ final class SetupModelTests: XCTestCase {
         XCTAssertTrue(settings.screenPermissionRequested)
     }
 
-    func testLifecycleOutputClaudeAndCompletionPersistence() async throws {
+    func testLifecycleOutputAgentsAndCompletionPersistence() async throws {
         let harness = Harness(root: try temporaryDirectory("lifecycle"))
         harness.tools["claude"] = "/usr/bin/true"
+        harness.tools["kiro-cli"] = "/usr/bin/true"
         var settings = try makeSettings("lifecycle")
         settings.mlxWhisperPath = harness.root.appendingPathComponent("missing").path
         let model = SetupModel(settings: settings, dependencies: harness.dependencies())
 
         model.beginChecks()
-        await waitUntil { model.enginePhase == .missing && model.claudeFound == true }
+        await waitUntil {
+            model.enginePhase == .missing
+                && model.claudeFound == true
+                && model.kiroFound == true
+        }
 
         let output = try temporaryDirectory("selected-output")
         model.setOutput(output)
-        model.setClaudeEnabled(true)
+        model.setAgentProvider(.kiroCLI)
         model.enginePhase = .done
         model.modelPhase = .done
         model.screenPerm = .granted
@@ -249,7 +273,7 @@ final class SetupModelTests: XCTestCase {
 
         XCTAssertEqual(model.outputPath, output.path)
         XCTAssertEqual(settings.outputFolder, output)
-        XCTAssertTrue(settings.claudeCleanupEnabled)
+        XCTAssertEqual(settings.agentConfiguration.provider, .kiroCLI)
         XCTAssertTrue(settings.setupCompleted)
 
         model.onEnter(.model)

@@ -2,6 +2,7 @@ import Foundation
 
 enum ClaudeCleaner {
     static let prompt = TranscriptProcessorSupport.defaultPrompt
+    static let model = "haiku"
 
     struct Result {
         let markdown: String
@@ -35,9 +36,16 @@ enum ClaudeCleaner {
         guard let bin = binary ?? ToolFinder.findTool("claude") else { return nil }
         let raw = try Subprocess.run(
             bin,
-            ["-p", "--tools", "", "--strict-mcp-config", "--no-session-persistence", prompt],
+            [
+                "-p",
+                "--model", model,
+                "--tools", "",
+                "--strict-mcp-config",
+                "--no-session-persistence",
+                prompt,
+            ],
             stdin: markdown,
-            timeout: 300,
+            timeout: TranscriptProcessorSupport.timeout(for: markdown),
             environment: Subprocess.restrictedEnvironment)
         if isLoginFailure(raw) { throw CleanError.notLoggedIn }
         let (slug, body) = extractTopic(raw)

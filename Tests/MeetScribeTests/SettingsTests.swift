@@ -103,6 +103,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(RecordingStartPolicy.automatic.displayName, "Record automatically")
         XCTAssertEqual(AgentProviderKind.disabled.displayName, "None")
         XCTAssertEqual(AgentProviderKind.claudeCode.displayName, "Claude Code")
+        XCTAssertEqual(AgentProviderKind.kiroCLI.displayName, "Kiro CLI")
         XCTAssertEqual(AgentProviderKind.customCommand.displayName, "Custom command")
 
         let replacement = MeetingRule(

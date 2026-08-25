@@ -33,6 +33,7 @@ final class ViewRenderingTests: XCTestCase {
 
         evaluate(AgentSettingsPane(settings: settings, configuration: .disabled, loaded: true))
         evaluate(AgentSettingsPane(settings: settings, configuration: .claudeCode, loaded: true))
+        evaluate(AgentSettingsPane(settings: settings, configuration: .kiroCLI, loaded: true))
         evaluate(AgentSettingsPane(
             settings: settings,
             configuration: AgentConfiguration(
@@ -230,9 +231,14 @@ final class ViewRenderingTests: XCTestCase {
         model.step = SetupStep.cleanup
         for found in [nil, true, false] as [Bool?] {
             model.claudeFound = found
-            model.claudeEnabled = found == true
+            model.kiroFound = found
+            model.agentProvider = found == true ? .kiroCLI : .disabled
             evaluate(SetupView(model: model))
         }
+        model.agentProvider = .claudeCode
+        evaluate(SetupView(model: model))
+        model.agentProvider = .customCommand
+        evaluate(SetupView(model: model))
 
         model.step = SetupStep.done
         evaluate(SetupView(model: model))
