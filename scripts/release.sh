@@ -16,11 +16,16 @@ export CODESIGN_IDENTITY VERSION BUILD_NUMBER
 ./build.sh
 
 ARCHIVE="build/MeetScribe-${VERSION}.zip"
-rm -f "$ARCHIVE"
-ditto -c -k --keepParent build/MeetScribe.app "$ARCHIVE"
+create_archive() {
+    rm -f "$ARCHIVE"
+    ditto -c -k --keepParent build/MeetScribe.app "$ARCHIVE"
+}
+
+create_archive
 xcrun notarytool submit "$ARCHIVE" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple build/MeetScribe.app
 xcrun stapler validate build/MeetScribe.app
 spctl --assess --type execute --verbose=2 build/MeetScribe.app
+create_archive
 shasum -a 256 "$ARCHIVE" > "$ARCHIVE.sha256"
 echo "Release artifact: $ARCHIVE"
