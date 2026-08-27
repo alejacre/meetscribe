@@ -1,13 +1,31 @@
+import Darwin
 import SwiftUI
 
 @main
 struct MeetScribeApp: App {
+    private static let singleInstanceGuard = SingleInstanceGuard()
+
     @StateObject private var state: AppState
     @StateObject private var coordinator: RecordingCoordinator
     @Environment(\.openWindow) private var openWindow
     private let firstRun: Bool
 
     init() {
+        let bundleIdentifier = Bundle.main.bundleIdentifier
+            ?? "dev.alejacre.meetscribe"
+        guard Self.singleInstanceGuard.acquire(
+            identifier: bundleIdentifier) == .acquired
+        else {
+            let currentProcessIdentifier =
+                ProcessInfo.processInfo.processIdentifier
+            NSRunningApplication
+                .runningApplications(withBundleIdentifier: bundleIdentifier)
+                .first {
+                    $0.processIdentifier != currentProcessIdentifier
+                }?
+                .activate()
+            Darwin.exit(0)
+        }
         SensitiveFilePermissions.install()
         let s = AppState()
         _state = StateObject(wrappedValue: s)
@@ -35,7 +53,7 @@ struct MeetScribeApp: App {
         MenuBarExtra {
             switch state.phase {
             case .idle:
-                Button("Start manual recording (all system audio)") {
+                Button("Start recording") {
                     Task { await coordinator.startRecording() }
                 }
             case .starting:
