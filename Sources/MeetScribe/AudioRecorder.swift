@@ -5,12 +5,19 @@ import CoreGraphics
 
 protocol AudioRecording: AnyObject, Sendable {
     var sourceWarning: String? { get }
+    var lastMeetingAudioActivityAt: Date? { get }
     var onStreamDied: ((Error) -> Void)? { get set }
     func start(session: RecordingSession, targetBundleID: String?) async throws
     func stop() async throws
 }
 
+extension AudioRecording {
+    var lastMeetingAudioActivityAt: Date? { nil }
+}
+
 final class AudioRecorder: NSObject, AudioRecording, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+    static let audibleRMSThreshold: Float = 0.005
+
     private var stream: SCStream?
     private var micFile: AVAudioFile?
     private var systemFile: AVAudioFile?
@@ -18,8 +25,12 @@ final class AudioRecorder: NSObject, AudioRecording, SCStreamOutput, SCStreamDel
     private let queue = DispatchQueue(label: "meetscribe.audio")
     private let stateLock = NSLock()
     private var sourceWarningValue: String?
+    private var lastMeetingAudioActivityValue: Date?
     var sourceWarning: String? {
         stateLock.withLock { sourceWarningValue }
+    }
+    var lastMeetingAudioActivityAt: Date? {
+        stateLock.withLock { lastMeetingAudioActivityValue }
     }
     /// Fired when the capture stream dies out from under us (display sleep,
     /// permission revoked); audio written so far stays on disk.
@@ -30,7 +41,10 @@ final class AudioRecorder: NSObject, AudioRecording, SCStreamOutput, SCStreamDel
     }
 
     func start(session: RecordingSession, targetBundleID: String? = nil) async throws {
-        stateLock.withLock { sourceWarningValue = nil }
+        stateLock.withLock {
+            sourceWarningValue = nil
+            lastMeetingAudioActivityValue = nil
+        }
         try session.createFolder()
         self.session = session
         let content = try await SCShareableContent.current
@@ -78,6 +92,7 @@ final class AudioRecorder: NSObject, AudioRecording, SCStreamOutput, SCStreamDel
         stateLock.withLock { self.stream = stream }
         do {
             try await stream.startCapture()
+            stateLock.withLock { lastMeetingAudioActivityValue = Date() }
         } catch {
             stateLock.withLock { self.stream = nil }
             throw error
@@ -118,6 +133,9 @@ final class AudioRecorder: NSObject, AudioRecording, SCStreamOutput, SCStreamDel
               let session,
               let pcm = sampleBuffer.asPCMBuffer else { return }
         do {
+            if type == .audio, Self.isAudible(pcm) {
+                stateLock.withLock { lastMeetingAudioActivityValue = Date() }
+            }
             switch type {
             case .microphone: try append(pcm, to: &micFile, url: session.micURL)
             case .audio: try append(pcm, to: &systemFile, url: session.systemURL)
@@ -128,6 +146,33 @@ final class AudioRecorder: NSObject, AudioRecording, SCStreamOutput, SCStreamDel
                 sourceWarningValue = "A capture source failed: \(error.localizedDescription)"
             }
         }
+    }
+
+    static func isAudible(
+        _ pcm: AVAudioPCMBuffer,
+        rmsThreshold: Float = audibleRMSThreshold
+    ) -> Bool {
+        guard pcm.frameLength > 0,
+              pcm.format.commonFormat == .pcmFormatFloat32
+        else { return pcm.frameLength > 0 }
+        guard let channels = pcm.floatChannelData else { return true }
+        let frameCount = Int(pcm.frameLength)
+        let channelCount = Int(pcm.format.channelCount)
+        let sampleCount = pcm.format.isInterleaved
+            ? frameCount * channelCount
+            : frameCount
+        let buffers = pcm.format.isInterleaved ? 1 : channelCount
+        var squareSum = 0.0
+        var totalSamples = 0
+        for channel in 0..<buffers {
+            for index in 0..<sampleCount {
+                let sample = Double(channels[channel][index])
+                squareSum += sample * sample
+            }
+            totalSamples += sampleCount
+        }
+        guard totalSamples > 0 else { return false }
+        return sqrt(squareSum / Double(totalSamples)) >= Double(rmsThreshold)
     }
 
     private func append(_ pcm: AVAudioPCMBuffer, to file: inout AVAudioFile?, url: URL) throws {

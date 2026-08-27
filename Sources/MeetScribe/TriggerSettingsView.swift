@@ -50,7 +50,12 @@ struct TriggerSettingsPane: View {
                         }
                     }
                 }
-                Text("Automatic recording is opt-in per application. The menu bar indicator remains visible.")
+                Text(
+                    "Automatic recording is opt-in per application. Recordings linked "
+                        + "to one detected meeting stop after "
+                        + "\(RecordingCoordinator.meetingSilenceAutoStopMinutes) minutes "
+                        + "without remote audio. "
+                        + "The menu bar indicator remains visible.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

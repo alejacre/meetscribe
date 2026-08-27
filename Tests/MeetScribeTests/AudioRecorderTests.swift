@@ -50,6 +50,41 @@ final class AudioRecorderTests: XCTestCase {
         XCTAssertNil(recorder.onStreamDied)
     }
 
+    func testAudibleAudioUsesRMSAcrossTheBuffer() throws {
+        let format = try XCTUnwrap(
+            AVAudioFormat(
+                standardFormatWithSampleRate: 48_000,
+                channels: 1))
+        let buffer = try XCTUnwrap(
+            AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: 480))
+        buffer.frameLength = buffer.frameCapacity
+        let samples = try XCTUnwrap(buffer.floatChannelData?.pointee)
+
+        samples.initialize(repeating: 0.001, count: Int(buffer.frameLength))
+        XCTAssertFalse(AudioRecorder.isAudible(buffer))
+
+        samples.initialize(repeating: 0.02, count: Int(buffer.frameLength))
+        XCTAssertTrue(AudioRecorder.isAudible(buffer))
+    }
+
+    func testAudibleAudioFailsSafeForUnsupportedFormats() throws {
+        let format = try XCTUnwrap(
+            AVAudioFormat(
+                commonFormat: .pcmFormatInt16,
+                sampleRate: 48_000,
+                channels: 1,
+                interleaved: false))
+        let buffer = try XCTUnwrap(
+            AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: 1))
+        buffer.frameLength = 1
+
+        XCTAssertTrue(AudioRecorder.isAudible(buffer))
+    }
+
     func testMixCreatesPrivateAudioFromAvailableTrack() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(

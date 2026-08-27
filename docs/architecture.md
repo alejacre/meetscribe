@@ -35,7 +35,7 @@ CoreAudio meeting detection / manual action
 
 `MeetingDetector` reports a set of active applications. `MeetingRule` maps a bundle identifier to a display name, stable output label, and `ignore`, `ask`, or `automatic` policy.
 
-Notification actions carry the meeting bundle identifier so simultaneous prompts cannot select the wrong application. Manual and hotkey recordings do not inherit a pending meeting prompt.
+Notification actions carry the meeting bundle identifier so simultaneous prompts cannot select the wrong application. Manual and hotkey recordings target the single detected non-ignored meeting when unambiguous; otherwise they capture all system audio. Meeting-linked recordings stop when detection ends or after five minutes without remote audio.
 
 ### Local Workspace
 

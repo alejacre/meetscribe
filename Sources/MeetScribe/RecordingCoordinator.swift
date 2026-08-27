@@ -3,6 +3,10 @@ import AppKit
 
 @MainActor
 final class RecordingCoordinator: ObservableObject {
+    static let meetingSilenceAutoStopMinutes = 5
+    static let meetingSilenceAutoStopInterval =
+        TimeInterval(meetingSilenceAutoStopMinutes * 60)
+
     let state: AppState
     let notifier: Notifier
     let detector: MeetingDetector
@@ -17,6 +21,7 @@ final class RecordingCoordinator: ObservableObject {
     private let recorderFactory: () -> any AudioRecording
     private let mixer: (RecordingSession) async throws -> Void
     private let backgroundWork: RecordingBackgroundWorkController
+    private let silenceAutoStopInterval: TimeInterval
 
     static let hotKeySettingChanged = Notification.Name("meetscribe.hotKeySettingChanged")
 
@@ -29,6 +34,7 @@ final class RecordingCoordinator: ObservableObject {
         mixer: @escaping (RecordingSession) async throws -> Void = { try await AudioRecorder.mix(session: $0) },
         transcriptionRunner: RecordingTranscriptionRunner = .live,
         publicationRunner: RecordingPublicationRunner = .live,
+        silenceAutoStopInterval: TimeInterval = RecordingCoordinator.meetingSilenceAutoStopInterval,
         enableSystemIntegrations: Bool = true
     ) {
         self.state = state
@@ -36,6 +42,7 @@ final class RecordingCoordinator: ObservableObject {
         self.notifier = notifier
         self.recorderFactory = recorderFactory
         self.mixer = mixer
+        self.silenceAutoStopInterval = silenceAutoStopInterval
         self.backgroundWork = RecordingBackgroundWorkController(
             state: state,
             notifier: notifier,
@@ -151,16 +158,19 @@ final class RecordingCoordinator: ObservableObject {
         meeting: DetectedMeeting? = nil
     ) async {
         guard case .idle = state.phase else { return }
-        if let meeting {
-            state.pendingMeetingPrompts.removeAll { $0.bundleID == meeting.bundleID }
+        let associatedMeeting = meeting ?? inferredMeeting(for: trigger)
+        if let associatedMeeting {
+            state.pendingMeetingPrompts.removeAll {
+                $0.bundleID == associatedMeeting.bundleID
+            }
         }
         state.phase = .starting
         stopRequestedDuringStart = false
         let s = RecordingSession(
             root: settings.outputFolder,
             start: Date(),
-            appName: meeting?.appName,
-            bundleID: meeting?.bundleID,
+            appName: associatedMeeting?.appName,
+            bundleID: associatedMeeting?.bundleID,
             trigger: trigger)
         let r = recorderFactory()
         recorder = r
@@ -176,20 +186,21 @@ final class RecordingCoordinator: ObservableObject {
             }
         }
         do {
-            try await r.start(session: s, targetBundleID: meeting?.bundleID)
+            try await r.start(
+                session: s,
+                targetBundleID: associatedMeeting?.bundleID)
             state.phase = .recording
             if stopRequestedDuringStart {
                 await stopRecording()
                 return
             }
-            let start = s.start
             state.elapsedSeconds = 0
             state.lastError = nil
             state.showPermissionHelp = false
             // .common mode: keep ticking while the menu is open (menu tracking pauses default-mode timers)
             let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
                 Task { @MainActor in
-                    self?.state.elapsedSeconds = Int(Date().timeIntervalSince(start))
+                    await self?.handleRecordingTimerTick(at: Date())
                 }
             }
             RunLoop.main.add(timer, forMode: .common)
@@ -198,7 +209,10 @@ final class RecordingCoordinator: ObservableObject {
                 options: [.idleSystemSleepDisabled],
                 reason: "MeetScribe is recording a meeting")
             notifier.notify(title: "Recording started",
-                            body: meeting == nil ? "Manual capture includes all system audio." : "Meeting audio capture started.",
+                            body: associatedMeeting == nil
+                                ? "Manual capture includes all system audio."
+                                : "Meeting audio capture started and stops after "
+                                    + "\(Self.meetingSilenceAutoStopMinutes) minutes without remote audio.",
                             category: "INFO",
                             userInfo: ["recording": s.basename])
         } catch {
@@ -216,6 +230,27 @@ final class RecordingCoordinator: ObservableObject {
             notifier.notify(title: "Recording failed to start",
                             body: error.localizedDescription, category: "INFO")
         }
+    }
+
+    func handleRecordingTimerTick(at now: Date) async {
+        guard state.phase == .recording,
+              let recorder,
+              let session
+        else {
+            return
+        }
+        state.elapsedSeconds = Int(now.timeIntervalSince(session.start))
+        guard session.sourceBundleID != nil else { return }
+        let lastActivity = recorder.lastMeetingAudioActivityAt ?? session.start
+        guard now.timeIntervalSince(lastActivity) >= silenceAutoStopInterval else {
+            return
+        }
+        await stopRecording()
+        notifier.notify(
+            title: "Meeting appears to have ended",
+            body: "No remote meeting audio for "
+                + "\(Self.meetingSilenceAutoStopMinutes) minutes. Recording stopped.",
+            category: "INFO")
     }
 
     func stopRecording() async {
@@ -256,6 +291,23 @@ final class RecordingCoordinator: ObservableObject {
         stopRequestedDuringStart = false
         state.phase = .idle
         refreshRecent()
+    }
+
+    private func inferredMeeting(
+        for trigger: RecordingTriggerKind
+    ) -> DetectedMeeting? {
+        switch trigger {
+        case .manual, .hotKey:
+            let eligibleMeetings = detectedMeetings.values.filter { meeting in
+                settings.meetingRules
+                    .first { $0.bundleID == meeting.bundleID }?
+                    .policy != .ignore
+            }
+            guard eligibleMeetings.count == 1 else { return nil }
+            return eligibleMeetings.first
+        case .meetingPrompt, .meetingAutomatic:
+            return nil
+        }
     }
 
     /// Runs Whisper and optional transcript processing off the main actor; the app stays usable

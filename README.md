@@ -71,6 +71,10 @@ flowchart LR
 - Native menu bar controls and a recordings browser with full-text search,
   summaries, decisions, timestamped turns, notifications, launch at login, and
   the `Option+Shift+R` global shortcut.
+- Manual and shortcut capture targets the single detected meeting application
+  when unambiguous; otherwise it records all system audio.
+- Meeting-linked recordings stop after five minutes without remote audio, even
+  if the meeting application keeps the call open.
 - Separate microphone and meeting-audio capture through ScreenCaptureKit.
 - Locked and verified MLX Whisper model revisions for Apple Silicon.
 - Claude Code adapter pinned to Haiku, with tools and session persistence disabled.
@@ -116,6 +120,10 @@ Open **Settings > Triggers**:
 - **Ignore** never starts or prompts.
 - **Ask before recording** sends an actionable notification.
 - **Record automatically** starts while that app actively uses the microphone.
+
+`Ignore` also excludes that application from manual/shortcut meeting inference.
+When exactly one non-ignored meeting is detected, manual and shortcut capture
+record that application and use the five-minute remote-audio fallback.
 
 ### Transcript agents
 

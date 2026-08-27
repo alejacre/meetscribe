@@ -88,6 +88,230 @@ final class RecordingCoordinatorTests: XCTestCase {
         XCTAssertNil(recorder.targetBundleID)
     }
 
+    func testManualRecordingTargetsOneDetectedMeeting() async throws {
+        let root = try temporaryDirectory("coordinator-manual-meeting")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (settings, suite) = try makeSettings(root: root)
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let meeting = DetectedMeeting(
+            bundleID: "com.microsoft.teams2",
+            appName: "teams")
+        let detector = MeetingDetector(appDefinitions: {
+            [meeting.bundleID: meeting.appName]
+        })
+        let recorder = FolderCreatingRecorder()
+        let coordinator = RecordingCoordinator(
+            state: AppState(),
+            settings: settings,
+            detector: detector,
+            recorderFactory: { recorder },
+            mixer: { _ in throw TestError.expected },
+            enableSystemIntegrations: false)
+
+        detector.onMeetingStart?(meeting)
+        try await waitUntil {
+            coordinator.state.pendingMeetingPrompts == [meeting]
+        }
+        await coordinator.startRecording()
+
+        XCTAssertEqual(recorder.targetBundleID, meeting.bundleID)
+        XCTAssertEqual(recorder.session?.sourceBundleID, meeting.bundleID)
+        XCTAssertEqual(recorder.session?.trigger, .manual)
+        await coordinator.stopRecording()
+    }
+
+    func testManualRecordingDoesNotAssociateWhenMultipleMeetingsAreDetected() async throws {
+        let root = try temporaryDirectory("coordinator-multiple-meetings")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (settings, suite) = try makeSettings(root: root)
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let teams = DetectedMeeting(
+            bundleID: "com.microsoft.teams2",
+            appName: "teams")
+        let slack = DetectedMeeting(
+            bundleID: "com.tinyspeck.slackmacgap",
+            appName: "slack")
+        let detector = MeetingDetector(appDefinitions: { [
+            teams.bundleID: teams.appName,
+            slack.bundleID: slack.appName,
+        ] })
+        let recorder = FolderCreatingRecorder()
+        let coordinator = RecordingCoordinator(
+            state: AppState(),
+            settings: settings,
+            detector: detector,
+            recorderFactory: { recorder },
+            mixer: { _ in throw TestError.expected },
+            enableSystemIntegrations: false)
+
+        detector.onMeetingStart?(teams)
+        detector.onMeetingStart?(slack)
+        try await waitUntil {
+            coordinator.state.pendingMeetingPrompts.count == 2
+        }
+        await coordinator.startRecording()
+
+        XCTAssertNil(recorder.targetBundleID)
+        XCTAssertNil(recorder.session?.sourceBundleID)
+        XCTAssertEqual(recorder.session?.trigger, .manual)
+        await coordinator.stopRecording()
+    }
+
+    func testManualRecordingDoesNotAssociateIgnoredMeeting() async throws {
+        let root = try temporaryDirectory("coordinator-ignored-meeting")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (settings, suite) = try makeSettings(root: root)
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let meeting = DetectedMeeting(
+            bundleID: "com.microsoft.teams2",
+            appName: "teams")
+        var ignoredSettings = settings
+        ignoredSettings.meetingRules = ignoredSettings.meetingRules.map { rule in
+            var updated = rule
+            if updated.bundleID == meeting.bundleID {
+                updated.policy = .ignore
+            }
+            return updated
+        }
+        let detector = MeetingDetector(appDefinitions: {
+            [meeting.bundleID: meeting.appName]
+        })
+        let recorder = FolderCreatingRecorder()
+        let coordinator = RecordingCoordinator(
+            state: AppState(),
+            settings: ignoredSettings,
+            detector: detector,
+            recorderFactory: { recorder },
+            mixer: { _ in throw TestError.expected },
+            enableSystemIntegrations: false)
+
+        detector.onMeetingStart?(meeting)
+        try await Task.sleep(for: .milliseconds(10))
+        await coordinator.startRecording()
+
+        XCTAssertNil(recorder.targetBundleID)
+        XCTAssertNil(recorder.session?.sourceBundleID)
+        await coordinator.stopRecording()
+    }
+
+    func testHotKeyRecordingTargetsOneDetectedMeeting() async throws {
+        let root = try temporaryDirectory("coordinator-hotkey-meeting")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (settings, suite) = try makeSettings(root: root)
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let meeting = DetectedMeeting(
+            bundleID: "com.microsoft.teams2",
+            appName: "teams")
+        let detector = MeetingDetector(appDefinitions: {
+            [meeting.bundleID: meeting.appName]
+        })
+        let recorder = FolderCreatingRecorder()
+        let coordinator = RecordingCoordinator(
+            state: AppState(),
+            settings: settings,
+            detector: detector,
+            recorderFactory: { recorder },
+            mixer: { _ in throw TestError.expected },
+            enableSystemIntegrations: false)
+
+        detector.onMeetingStart?(meeting)
+        try await waitUntil {
+            coordinator.state.pendingMeetingPrompts == [meeting]
+        }
+        await coordinator.startRecording(trigger: .hotKey)
+
+        XCTAssertEqual(recorder.targetBundleID, meeting.bundleID)
+        XCTAssertEqual(recorder.session?.trigger, .hotKey)
+        await coordinator.stopRecording()
+    }
+
+    func testMeetingRecordingStopsAfterSilenceTimeout() async throws {
+        let root = try temporaryDirectory("coordinator-silence-stop")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (settings, suite) = try makeSettings(root: root)
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let meeting = DetectedMeeting(
+            bundleID: "com.microsoft.teams2",
+            appName: "teams")
+        let recorder = FolderCreatingRecorder()
+        let state = AppState()
+        let coordinator = RecordingCoordinator(
+            state: state,
+            settings: settings,
+            recorderFactory: { recorder },
+            mixer: { _ in throw TestError.expected },
+            silenceAutoStopInterval: 300,
+            enableSystemIntegrations: false)
+
+        await coordinator.startRecording(
+            trigger: .meetingPrompt,
+            meeting: meeting)
+        let activity = Date()
+        recorder.lastMeetingAudioActivityAt = activity
+        await coordinator.handleRecordingTimerTick(
+            at: activity.addingTimeInterval(300))
+
+        XCTAssertEqual(recorder.stopCount, 1)
+        XCTAssertEqual(state.phase, .idle)
+    }
+
+    func testRecentActivityKeepsMeetingRecordingRunning() async throws {
+        let root = try temporaryDirectory("coordinator-recent-activity")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (settings, suite) = try makeSettings(root: root)
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let meeting = DetectedMeeting(
+            bundleID: "com.microsoft.teams2",
+            appName: "teams")
+        let recorder = FolderCreatingRecorder()
+        let state = AppState()
+        let coordinator = RecordingCoordinator(
+            state: state,
+            settings: settings,
+            recorderFactory: { recorder },
+            mixer: { _ in throw TestError.expected },
+            silenceAutoStopInterval: 300,
+            enableSystemIntegrations: false)
+
+        await coordinator.startRecording(
+            trigger: .meetingPrompt,
+            meeting: meeting)
+        let activity = Date()
+        recorder.lastMeetingAudioActivityAt = activity
+        await coordinator.handleRecordingTimerTick(
+            at: activity.addingTimeInterval(299))
+
+        XCTAssertEqual(recorder.stopCount, 0)
+        XCTAssertEqual(state.phase, .recording)
+        await coordinator.stopRecording()
+    }
+
+    func testUnassociatedManualRecordingIgnoresSilenceTimeout() async throws {
+        let root = try temporaryDirectory("coordinator-manual-silence")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (settings, suite) = try makeSettings(root: root)
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let recorder = FolderCreatingRecorder()
+        let state = AppState()
+        let coordinator = RecordingCoordinator(
+            state: state,
+            settings: settings,
+            recorderFactory: { recorder },
+            mixer: { _ in throw TestError.expected },
+            silenceAutoStopInterval: 1,
+            enableSystemIntegrations: false)
+
+        await coordinator.startRecording()
+        let activity = Date()
+        recorder.lastMeetingAudioActivityAt = activity
+        await coordinator.handleRecordingTimerTick(
+            at: activity.addingTimeInterval(10))
+
+        XCTAssertEqual(recorder.stopCount, 0)
+        XCTAssertEqual(state.phase, .recording)
+        await coordinator.stopRecording()
+    }
+
     func testAskPolicyKeepsActionablePromptUntilMeetingEnds() async throws {
         let root = try temporaryDirectory("coordinator-meeting-prompt")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -254,12 +478,15 @@ final class RecordingCoordinatorTests: XCTestCase {
 
     private final class FolderCreatingRecorder: AudioRecording, @unchecked Sendable {
         var sourceWarning: String?
+        var lastMeetingAudioActivityAt: Date?
         var onStreamDied: ((Error) -> Void)?
         private(set) var session: RecordingSession?
         private(set) var stopCount = 0
+        private(set) var targetBundleID: String?
 
         func start(session: RecordingSession, targetBundleID: String?) async throws {
             self.session = session
+            self.targetBundleID = targetBundleID
             try session.createFolder()
         }
 
