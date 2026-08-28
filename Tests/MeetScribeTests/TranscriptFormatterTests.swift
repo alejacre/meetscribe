@@ -141,6 +141,54 @@ final class TranscriptFormatterTests: XCTestCase {
         XCTAssertEqual(filtered, [seg(31, 33, "okay sounds good to me")])
     }
 
+    func testDropsTranslatedVideoFillerOnLongSilentSegment() {
+        let mic = [
+            seg(0, 30, "Gracias por ver el video."),
+            seg(31, 33, "Necesito revisar los datos."),
+        ]
+
+        XCTAssertEqual(
+            TranscriptFormatter.dropHallucinations(mic),
+            [mic[1]])
+    }
+
+    func testDropsRepeatedMicHallucinationsOverRemoteSpeech() {
+        let mic = (0..<6).map { index in
+            seg(Double(index * 10), Double(index * 10 + 1), "Thank you.")
+        } + [seg(70, 72, "I can take that action.")]
+        let system = (0..<6).map { index in
+            seg(Double(index * 10), Double(index * 10 + 4), "Remote speaker continues.")
+        }
+
+        let filtered = TranscriptFormatter.dropHallucinations(
+            mic,
+            overlapping: system)
+
+        XCTAssertEqual(filtered, [seg(70, 72, "I can take that action.")])
+    }
+
+    func testKeepsOneRepeatedPhraseWithoutRemoteSpeechOverlap() {
+        let mic = (0..<6).map { index in
+            seg(Double(index * 10), Double(index * 10 + 1), "Thank you.")
+        }
+
+        XCTAssertEqual(
+            TranscriptFormatter.dropHallucinations(mic),
+            [mic[0]])
+    }
+
+    func testDropsSingleSegmentRepeatedTokenLoop() {
+        let loop = seg(
+            0,
+            3,
+            "no no no no no no no no no no no no no no")
+        let real = seg(5, 7, "No, that result is not correct.")
+
+        XCTAssertEqual(
+            TranscriptFormatter.dropHallucinations([loop, real]),
+            [real])
+    }
+
     func testKeepsShortRealFiller() {
         // A genuine quick "Yes." over 1s is real speech, not a hallucination.
         let mic = [seg(0, 1, "Yes."), seg(5, 8, "let us proceed then")]

@@ -61,22 +61,59 @@ enum TranscriptFormatter {
         }
     }
 
-    /// Whisper hallucinations that survive the decoder flags: short filler phrases
-    /// ("thank you", "you", "bye") emitted on long segments of near-silence, and the same
-    /// tiny phrase repeated back-to-back (a decoder loop). We only drop a filler phrase
-    /// when its segment is long relative to its text  -  real speech packs words into that
-    /// span; a lone "thank you" stretched over a 30s block does not. This runs before turn
-    /// grouping so loops never reach the output.
-    static let fillerPhrases: Set<String> = ["thank you", "thanks", "you", "bye", "okay", "yeah", "yes", "yep"]
+    /// Whisper hallucinations that survive the decoder flags: sparse filler phrases,
+    /// known phrases repeated while the remote speaker is talking, and single-token
+    /// decoder loops. This runs before turn grouping so those artifacts never reach
+    /// the output.
+    static let repeatedHallucinationPhrases: Set<String> = [
+        "thank you",
+        "thanks",
+        "thank you for watching",
+        "thanks for watching",
+        "gracias",
+        "gracias por ver el video",
+    ]
+    static let fillerPhrases: Set<String> = repeatedHallucinationPhrases.union([
+        "you",
+        "bye",
+        "okay",
+        "yeah",
+        "yes",
+        "yep",
+    ])
+    static let repeatedHallucinationMinimumCount = 5
+    static let repeatedTokenMinimumCount = 12
     /// A segment whose seconds-per-word exceeds this is too sparse to be real speech.
     static let maxSecondsPerWord: Double = 4.0
 
-    static func dropHallucinations(_ segments: [WhisperSegment]) -> [WhisperSegment] {
+    static func dropHallucinations(
+        _ segments: [WhisperSegment],
+        overlapping otherSegments: [WhisperSegment] = []
+    ) -> [WhisperSegment] {
+        let grouped = Dictionary(grouping: segments) { normalize($0.text) }
+        let repeatedOverlappingPhrases: Set<String> = Set(
+            grouped.compactMap { phrase, matches -> String? in
+                guard repeatedHallucinationPhrases.contains(phrase),
+                      matches.count >= repeatedHallucinationMinimumCount
+                else {
+                    return nil
+                }
+                let overlappingCount = matches.filter { segment in
+                    otherSegments.contains { other in
+                        segment.start < other.end + echoTimeSlack
+                            && segment.end > other.start - echoTimeSlack
+                    }
+                }.count
+                return overlappingCount * 2 >= matches.count ? phrase : nil
+            })
+
         var out: [WhisperSegment] = []
         for seg in segments {
             let norm = normalize(seg.text)
             let words = norm.split(separator: " ")
             guard !words.isEmpty else { continue }
+            if repeatedOverlappingPhrases.contains(norm) { continue }
+            if isRepeatedTokenLoop(words) { continue }
 
             // Filler phrase stretched over a long, sparse segment => silence hallucination.
             if fillerPhrases.contains(norm) {
@@ -92,6 +129,15 @@ enum TranscriptFormatter {
         return out
     }
 
+    private static func isRepeatedTokenLoop(_ words: [Substring]) -> Bool {
+        guard words.count >= repeatedTokenMinimumCount else { return false }
+        let counts = Dictionary(words.map { (String($0), 1) }, uniquingKeysWith: +)
+        guard counts.count <= 2, let dominantCount = counts.values.max() else {
+            return false
+        }
+        return dominantCount * 100 >= words.count * 80
+    }
+
     private static func normalize(_ text: String) -> String {
         text.lowercased()
             .filter { $0.isLetter || $0.isNumber || $0.isWhitespace }
@@ -100,7 +146,7 @@ enum TranscriptFormatter {
 
     static func format(mic: [WhisperSegment], system: [WhisperSegment], header: TranscriptHeader) -> String {
         struct Tagged { let speaker: Speaker; let seg: WhisperSegment }
-        let cleanMic = dropHallucinations(mic)
+        let cleanMic = dropHallucinations(mic, overlapping: system)
         let cleanSystem = dropHallucinations(system)
         let all = (cleanMic.map { Tagged(speaker: .me, seg: $0) } + cleanSystem.map { Tagged(speaker: .them, seg: $0) })
             .sorted { $0.seg.start < $1.seg.start }
