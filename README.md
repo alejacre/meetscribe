@@ -58,7 +58,7 @@ flowchart LR
 ```
 
 1. Choose `Ignore`, `Ask before recording`, or `Record automatically` per meeting app.
-2. MeetScribe records microphone and system audio as separate tracks.
+2. MeetScribe records system audio, with an optional separate microphone track.
 3. A locked MLX Whisper model transcribes both tracks locally.
 4. The formatter produces timestamped `Me` and `Them` turns.
 5. An optional transcript agent processes validated Markdown.
@@ -75,7 +75,7 @@ flowchart LR
   when unambiguous; otherwise it records all system audio.
 - Meeting-linked recordings stop after five minutes without remote audio, even
   if the meeting application keeps the call open.
-- Separate microphone and meeting-audio capture through ScreenCaptureKit.
+- Selectable computer-only or computer-plus-microphone capture through ScreenCaptureKit.
 - Locked and verified MLX Whisper model revisions for Apple Silicon.
 - Claude Code adapter pinned to Haiku, with tools and session persistence disabled.
 - Kiro CLI adapter with stdin transcript delivery, a temporary tool-free agent,
@@ -124,6 +124,20 @@ Open **Settings > Triggers**:
 `Ignore` also excludes that application from manual/shortcut meeting inference.
 When exactly one non-ignored meeting is detected, manual and shortcut capture
 record that application and use the five-minute remote-audio fallback.
+
+### Audio modes
+
+Choose one of the two recording actions in the menu bar:
+
+- **Computer + microphone** captures both tracks and preserves `Me`/`Them`
+  speaker attribution.
+- **Computer audio only** disables microphone capture at the source. Use it when
+  you are physically in the meeting room and the room system already carries the
+  conversation, avoiding a duplicate local microphone track.
+
+Set the default under **Settings > General > Default audio**. The global shortcut
+and automatic recordings use that default. Meeting notifications show both
+recording modes as separate actions.
 
 ### Transcript agents
 

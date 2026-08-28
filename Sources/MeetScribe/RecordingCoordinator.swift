@@ -63,7 +63,7 @@ final class RecordingCoordinator: ObservableObject {
         if enableSystemIntegrations, settings.setupCompleted {
             Task { await Permissions.requestNotifications() }
         }
-        notifier.onRecordAction = { [weak self] bundleID in
+        notifier.onRecordAction = { [weak self] bundleID, audioMode in
             Task { @MainActor in
                 guard let self,
                       let bundleID,
@@ -71,7 +71,10 @@ final class RecordingCoordinator: ObservableObject {
                 else {
                     return
                 }
-                await self.startRecording(trigger: .meetingPrompt, meeting: meeting)
+                await self.startRecording(
+                    trigger: .meetingPrompt,
+                    meeting: meeting,
+                    audioMode: audioMode)
             }
         }
         notifier.onRetryAction = { [weak self] note in
@@ -94,7 +97,7 @@ final class RecordingCoordinator: ObservableObject {
                     }
                     self.notifier.notify(
                         title: "Meeting detected: \(meeting.appName)",
-                        body: "Want to record it?",
+                        body: "Choose which audio sources to record.",
                         category: "MEETING_START",
                         userInfo: ["meetingBundleID": meeting.bundleID])
                 case .automatic:
@@ -155,9 +158,11 @@ final class RecordingCoordinator: ObservableObject {
 
     func startRecording(
         trigger: RecordingTriggerKind = .manual,
-        meeting: DetectedMeeting? = nil
+        meeting: DetectedMeeting? = nil,
+        audioMode: RecordingAudioMode? = nil
     ) async {
         guard case .idle = state.phase else { return }
+        let selectedAudioMode = audioMode ?? settings.recordingAudioMode
         let associatedMeeting = meeting ?? inferredMeeting(for: trigger)
         if let associatedMeeting {
             state.pendingMeetingPrompts.removeAll {
@@ -188,7 +193,8 @@ final class RecordingCoordinator: ObservableObject {
         do {
             try await r.start(
                 session: s,
-                targetBundleID: associatedMeeting?.bundleID)
+                targetBundleID: associatedMeeting?.bundleID,
+                audioMode: selectedAudioMode)
             state.phase = .recording
             if stopRequestedDuringStart {
                 await stopRecording()
@@ -209,10 +215,9 @@ final class RecordingCoordinator: ObservableObject {
                 options: [.idleSystemSleepDisabled],
                 reason: "MeetScribe is recording a meeting")
             notifier.notify(title: "Recording started",
-                            body: associatedMeeting == nil
-                                ? "Manual capture includes all system audio."
-                                : "Meeting audio capture started and stops after "
-                                    + "\(Self.meetingSilenceAutoStopMinutes) minutes without remote audio.",
+                            body: recordingStartedMessage(
+                                meeting: associatedMeeting,
+                                audioMode: selectedAudioMode),
                             category: "INFO",
                             userInfo: ["recording": s.basename])
         } catch {
@@ -230,6 +235,18 @@ final class RecordingCoordinator: ObservableObject {
             notifier.notify(title: "Recording failed to start",
                             body: error.localizedDescription, category: "INFO")
         }
+    }
+
+    private func recordingStartedMessage(
+        meeting: DetectedMeeting?,
+        audioMode: RecordingAudioMode
+    ) -> String {
+        let source = audioMode == .systemOnly
+            ? "Computer audio only."
+            : "Computer and microphone audio."
+        guard meeting != nil else { return source }
+        return source + " Recording stops after "
+            + "\(Self.meetingSilenceAutoStopMinutes) minutes without remote audio."
     }
 
     func handleRecordingTimerTick(at now: Date) async {

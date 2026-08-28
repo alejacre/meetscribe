@@ -51,6 +51,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(s.screenPermissionRequested)
         XCTAssertTrue(s.mlxWhisperPath.hasSuffix("mlx_whisper"))
         XCTAssertEqual(s.retentionConfiguration, RetentionConfiguration())
+        XCTAssertEqual(s.recordingAudioMode, .microphoneAndSystem)
     }
 
     func testPersistence() {
@@ -58,10 +59,18 @@ final class SettingsTests: XCTestCase {
         s.outputFolder = URL(fileURLWithPath: "/tmp/recs")
         s.claudeCleanupEnabled = true
         s.screenPermissionRequested = true
+        s.recordingAudioMode = .systemOnly
         let s2 = Settings(defaults: defaults)
         XCTAssertEqual(s2.outputFolder.path, "/tmp/recs")
         XCTAssertTrue(s2.claudeCleanupEnabled)
         XCTAssertTrue(s2.screenPermissionRequested)
+        XCTAssertEqual(s2.recordingAudioMode, .systemOnly)
+    }
+
+    func testUnknownPersistedAudioModeFallsBackToDefault() {
+        defaults.set("hologram", forKey: "recordingAudioMode")
+        let s = Settings(defaults: defaults)
+        XCTAssertEqual(s.recordingAudioMode, .microphoneAndSystem)
     }
 
     func testChangingOutputFolderPostsNotification() {
@@ -170,6 +179,14 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(AgentProviderKind.claudeCode.displayName, "Claude Code")
         XCTAssertEqual(AgentProviderKind.kiroCLI.displayName, "Kiro CLI")
         XCTAssertEqual(AgentProviderKind.customCommand.displayName, "Custom command")
+        XCTAssertEqual(
+            RecordingAudioMode.microphoneAndSystem.displayName,
+            "Computer + microphone")
+        XCTAssertEqual(
+            RecordingAudioMode.systemOnly.displayName,
+            "Computer audio only")
+        XCTAssertTrue(RecordingAudioMode.microphoneAndSystem.capturesMicrophone)
+        XCTAssertFalse(RecordingAudioMode.systemOnly.capturesMicrophone)
 
         let replacement = MeetingRule(
             bundleID: "us.zoom.xos",

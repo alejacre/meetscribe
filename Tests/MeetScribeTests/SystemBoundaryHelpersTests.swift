@@ -34,4 +34,20 @@ final class SystemBoundaryHelpersTests: XCTestCase {
         XCTAssertNil(Permissions.privacyPaneURL("Privacy_AllFiles"))
         XCTAssertNil(Permissions.privacyPaneURL("bad\nanchor"))
     }
+
+    func testNotifierMapsRecordingActionsToAudioModes() {
+        XCTAssertEqual(
+            Notifier.audioMode(
+                forRecordActionIdentifier: Notifier.recordWithMicrophoneAction),
+            .microphoneAndSystem)
+        XCTAssertEqual(
+            Notifier.audioMode(
+                forRecordActionIdentifier: Notifier.recordSystemOnlyAction),
+            .systemOnly)
+        XCTAssertEqual(
+            Notifier.audioMode(forRecordActionIdentifier: "RECORD"),
+            .microphoneAndSystem)
+        XCTAssertNil(
+            Notifier.audioMode(forRecordActionIdentifier: "UNKNOWN"))
+    }
 }

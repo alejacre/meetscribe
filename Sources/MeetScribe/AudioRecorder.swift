@@ -7,7 +7,11 @@ protocol AudioRecording: AnyObject, Sendable {
     var sourceWarning: String? { get }
     var lastMeetingAudioActivityAt: Date? { get }
     var onStreamDied: ((Error) -> Void)? { get set }
-    func start(session: RecordingSession, targetBundleID: String?) async throws
+    func start(
+        session: RecordingSession,
+        targetBundleID: String?,
+        audioMode: RecordingAudioMode
+    ) async throws
     func stop() async throws
 }
 
@@ -40,7 +44,11 @@ final class AudioRecorder: NSObject, AudioRecording, SCStreamOutput, SCStreamDel
         set { stateLock.withLock { streamDiedHandler = newValue } }
     }
 
-    func start(session: RecordingSession, targetBundleID: String? = nil) async throws {
+    func start(
+        session: RecordingSession,
+        targetBundleID: String? = nil,
+        audioMode: RecordingAudioMode
+    ) async throws {
         stateLock.withLock {
             sourceWarningValue = nil
             lastMeetingAudioActivityValue = nil
@@ -74,7 +82,7 @@ final class AudioRecorder: NSObject, AudioRecording, SCStreamOutput, SCStreamDel
         let config = SCStreamConfiguration()
         config.capturesAudio = true
         config.excludesCurrentProcessAudio = true
-        config.captureMicrophone = true
+        config.captureMicrophone = audioMode.capturesMicrophone
         config.sampleRate = 48_000
         config.channelCount = 1
         // SCK requires a video stream; keep it tiny and never write it
@@ -88,7 +96,9 @@ final class AudioRecorder: NSObject, AudioRecording, SCStreamOutput, SCStreamDel
         // a missing video output once per second.
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
-        try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: queue)
+        if audioMode.capturesMicrophone {
+            try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: queue)
+        }
         stateLock.withLock { self.stream = stream }
         do {
             try await stream.startCapture()

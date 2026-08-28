@@ -1,5 +1,25 @@
 import Foundation
 
+enum RecordingAudioMode: String, CaseIterable, Identifiable, Sendable {
+    case microphoneAndSystem
+    case systemOnly
+
+    var id: Self { self }
+
+    var displayName: String {
+        switch self {
+        case .microphoneAndSystem:
+            "Computer + microphone"
+        case .systemOnly:
+            "Computer audio only"
+        }
+    }
+
+    var capturesMicrophone: Bool {
+        self == .microphoneAndSystem
+    }
+}
+
 struct Settings: @unchecked Sendable {
     static let outputFolderChanged = Notification.Name("meetscribe.outputFolderChanged")
 
@@ -15,6 +35,7 @@ struct Settings: @unchecked Sendable {
         static let meetingRules = "meetingRules.v1"
         static let destinations = "destinationConfiguration.v1"
         static let retention = "retentionConfiguration.v1"
+        static let recordingAudioMode = "recordingAudioMode"
         static let hotKeyEnabled = "hotKeyEnabled"
         static let setupCompleted = "setupCompleted"
         static let screenPermissionRequested = "screenPermissionRequested"
@@ -79,6 +100,15 @@ struct Settings: @unchecked Sendable {
     var retentionConfiguration: RetentionConfiguration {
         get { decode(Key.retention) ?? RetentionConfiguration() }
         set { encode(newValue, forKey: Key.retention) }
+    }
+
+    var recordingAudioMode: RecordingAudioMode {
+        get {
+            d.string(forKey: Key.recordingAudioMode)
+                .flatMap(RecordingAudioMode.init(rawValue:))
+                ?? .microphoneAndSystem
+        }
+        set { d.set(newValue.rawValue, forKey: Key.recordingAudioMode) }
     }
 
     var hotKeyEnabled: Bool {

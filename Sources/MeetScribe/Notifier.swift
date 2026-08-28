@@ -3,7 +3,10 @@ import AppKit
 import UserNotifications
 
 final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
-    var onRecordAction: ((String?) -> Void)?
+    static let recordWithMicrophoneAction = "RECORD_WITH_MICROPHONE"
+    static let recordSystemOnlyAction = "RECORD_SYSTEM_ONLY"
+
+    var onRecordAction: ((String?, RecordingAudioMode) -> Void)?
     var onRetryAction: ((URL) -> Void)?
     var isEnabled = true
 
@@ -14,10 +17,20 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
         let center = UNUserNotificationCenter.current()
         center.delegate = self
 
-        let record = UNNotificationAction(identifier: "RECORD", title: "Record", options: [])
+        let recordWithMicrophone = UNNotificationAction(
+            identifier: Self.recordWithMicrophoneAction,
+            title: RecordingAudioMode.microphoneAndSystem.displayName,
+            options: [])
+        let recordSystemOnly = UNNotificationAction(
+            identifier: Self.recordSystemOnlyAction,
+            title: RecordingAudioMode.systemOnly.displayName,
+            options: [])
         let retry = UNNotificationAction(identifier: "RETRY", title: "Retry transcription", options: [])
         center.setNotificationCategories([
-            UNNotificationCategory(identifier: "MEETING_START", actions: [record], intentIdentifiers: []),
+            UNNotificationCategory(
+                identifier: "MEETING_START",
+                actions: [recordWithMicrophone, recordSystemOnly],
+                intentIdentifiers: []),
             UNNotificationCategory(identifier: "INFO", actions: [], intentIdentifiers: []),
             UNNotificationCategory(identifier: "TRANSCRIBE_FAILED", actions: [retry], intentIdentifiers: []),
         ])
@@ -49,8 +62,6 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
         switch response.actionIdentifier {
-        case "RECORD":
-            onRecordAction?(response.notification.request.content.userInfo["meetingBundleID"] as? String)
         case "RETRY":
             if let note = Self.noteURL(
                 from: response.notification.request.content.userInfo,
@@ -68,7 +79,31 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
                 NSWorkspace.shared.open(
                     FileManager.default.fileExists(atPath: note.path) ? note : session.assetDir)
             }
-        default: break
+        default:
+            if let audioMode = Self.audioMode(
+                forRecordActionIdentifier: response.actionIdentifier)
+            {
+                onRecordAction?(
+                    response.notification.request.content.userInfo["meetingBundleID"] as? String,
+                    audioMode)
+            }
+        }
+    }
+
+    /// Maps a MEETING_START action identifier to the audio mode it requests.
+    /// The legacy "RECORD" identifier keeps notifications delivered by builds
+    /// that offered a single record action working after an update; it maps to
+    /// the old both-tracks behavior.
+    static func audioMode(
+        forRecordActionIdentifier actionIdentifier: String
+    ) -> RecordingAudioMode? {
+        switch actionIdentifier {
+        case recordWithMicrophoneAction, "RECORD":
+            .microphoneAndSystem
+        case recordSystemOnlyAction:
+            .systemOnly
+        default:
+            nil
         }
     }
 

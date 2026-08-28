@@ -88,6 +88,69 @@ final class RecordingCoordinatorTests: XCTestCase {
         XCTAssertNil(recorder.targetBundleID)
     }
 
+    func testRecordingForwardsExplicitAudioMode() async {
+        let recorder = CapturingFailingRecorder()
+        let coordinator = RecordingCoordinator(
+            state: AppState(),
+            recorderFactory: { recorder },
+            enableSystemIntegrations: false)
+
+        await coordinator.startRecording(audioMode: .systemOnly)
+
+        XCTAssertEqual(recorder.audioMode, .systemOnly)
+    }
+
+    func testRecordingUsesConfiguredDefaultAudioMode() async throws {
+        let root = try temporaryDirectory("coordinator-audio-mode")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (baseSettings, suite) = try makeSettings(root: root)
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        var settings = baseSettings
+        settings.recordingAudioMode = .systemOnly
+        let recorder = CapturingFailingRecorder()
+        let coordinator = RecordingCoordinator(
+            state: AppState(),
+            settings: settings,
+            recorderFactory: { recorder },
+            enableSystemIntegrations: false)
+
+        await coordinator.startRecording(trigger: .meetingAutomatic)
+
+        XCTAssertEqual(recorder.audioMode, .systemOnly)
+    }
+
+    func testMeetingNotificationForwardsSelectedAudioMode() async throws {
+        let root = try temporaryDirectory("coordinator-notification-audio-mode")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (settings, suite) = try makeSettings(root: root)
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let meeting = DetectedMeeting(
+            bundleID: "com.microsoft.teams2",
+            appName: "teams")
+        let detector = MeetingDetector(appDefinitions: {
+            [meeting.bundleID: meeting.appName]
+        })
+        let notifier = Notifier()
+        let recorder = CapturingFailingRecorder()
+        let coordinator = RecordingCoordinator(
+            state: AppState(),
+            settings: settings,
+            notifier: notifier,
+            detector: detector,
+            recorderFactory: { recorder },
+            enableSystemIntegrations: false)
+
+        detector.onMeetingStart?(meeting)
+        try await waitUntil {
+            coordinator.state.pendingMeetingPrompts == [meeting]
+        }
+        notifier.onRecordAction?(meeting.bundleID, .systemOnly)
+        try await waitUntil { recorder.audioMode != nil }
+
+        XCTAssertEqual(recorder.targetBundleID, meeting.bundleID)
+        XCTAssertEqual(recorder.audioMode, .systemOnly)
+    }
+
     func testManualRecordingTargetsOneDetectedMeeting() async throws {
         let root = try temporaryDirectory("coordinator-manual-meeting")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -450,7 +513,11 @@ final class RecordingCoordinatorTests: XCTestCase {
         private(set) var stopCount = 0
         private var continuation: CheckedContinuation<Void, Never>?
 
-        func start(session: RecordingSession, targetBundleID: String?) async throws {
+        func start(
+            session: RecordingSession,
+            targetBundleID: String?,
+            audioMode: RecordingAudioMode
+        ) async throws {
             startEntered = true
             await withCheckedContinuation { continuation = $0 }
         }
@@ -467,9 +534,15 @@ final class RecordingCoordinatorTests: XCTestCase {
         var sourceWarning: String?
         var onStreamDied: ((Error) -> Void)?
         private(set) var targetBundleID: String?
+        private(set) var audioMode: RecordingAudioMode?
 
-        func start(session: RecordingSession, targetBundleID: String?) async throws {
+        func start(
+            session: RecordingSession,
+            targetBundleID: String?,
+            audioMode: RecordingAudioMode
+        ) async throws {
             self.targetBundleID = targetBundleID
+            self.audioMode = audioMode
             throw TestError.expected
         }
 
@@ -483,10 +556,16 @@ final class RecordingCoordinatorTests: XCTestCase {
         private(set) var session: RecordingSession?
         private(set) var stopCount = 0
         private(set) var targetBundleID: String?
+        private(set) var audioMode: RecordingAudioMode?
 
-        func start(session: RecordingSession, targetBundleID: String?) async throws {
+        func start(
+            session: RecordingSession,
+            targetBundleID: String?,
+            audioMode: RecordingAudioMode
+        ) async throws {
             self.session = session
             self.targetBundleID = targetBundleID
+            self.audioMode = audioMode
             try session.createFolder()
         }
 

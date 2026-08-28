@@ -71,6 +71,7 @@ struct GeneralSettingsPane: View {
     @State private var outputPath = ""
     @State private var model = ""
     @State private var whisperPath = ""
+    @State private var recordingAudioMode = RecordingAudioMode.microphoneAndSystem
     @State private var hotKeyOn = true
     @State private var launchAtLogin = false
     @State private var configurationError: String?
@@ -80,6 +81,7 @@ struct GeneralSettingsPane: View {
         outputPath: String = "",
         model: String = "",
         whisperPath: String = "",
+        recordingAudioMode: RecordingAudioMode = .microphoneAndSystem,
         hotKeyOn: Bool = true,
         launchAtLogin: Bool = false,
         configurationError: String? = nil
@@ -88,6 +90,7 @@ struct GeneralSettingsPane: View {
         _outputPath = State(initialValue: outputPath)
         _model = State(initialValue: model)
         _whisperPath = State(initialValue: whisperPath)
+        _recordingAudioMode = State(initialValue: recordingAudioMode)
         _hotKeyOn = State(initialValue: hotKeyOn)
         _launchAtLogin = State(initialValue: launchAtLogin)
         _configurationError = State(initialValue: configurationError)
@@ -96,6 +99,20 @@ struct GeneralSettingsPane: View {
     var body: some View {
         Form {
             Section("Recordings") {
+                Picker("Default audio", selection: $recordingAudioMode) {
+                    ForEach(RecordingAudioMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .onChange(of: recordingAudioMode) { _, value in
+                    settings.recordingAudioMode = value
+                }
+                Text(
+                    "The shortcut and automatic recordings use this default. "
+                        + "You can choose either mode when starting from the menu."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
                 LabeledContent("Output folder") {
                     HStack(spacing: 8) {
                         Text(abbreviated(outputPath))
@@ -177,6 +194,7 @@ struct GeneralSettingsPane: View {
             outputPath = settings.outputFolder.path
             model = settings.whisperModel
             whisperPath = settings.mlxWhisperPath
+            recordingAudioMode = settings.recordingAudioMode
             hotKeyOn = settings.hotKeyEnabled
             launchAtLogin = SMAppService.mainApp.status == .enabled
         }

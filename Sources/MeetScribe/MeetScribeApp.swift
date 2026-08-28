@@ -53,8 +53,17 @@ struct MeetScribeApp: App {
         MenuBarExtra {
             switch state.phase {
             case .idle:
-                Button("Start recording") {
-                    Task { await coordinator.startRecording() }
+                Button("Record computer + microphone") {
+                    Task {
+                        await coordinator.startRecording(
+                            audioMode: .microphoneAndSystem)
+                    }
+                }
+                Button("Record computer audio only") {
+                    Task {
+                        await coordinator.startRecording(
+                            audioMode: .systemOnly)
+                    }
                 }
             case .starting:
                 Button("Cancel recording startup") { Task { await coordinator.stopRecording() } }
@@ -90,11 +99,16 @@ struct MeetScribeApp: App {
                 Divider()
                 Menu("Detected meetings") {
                     ForEach(state.pendingMeetingPrompts) { meeting in
-                        Button("Record \(meeting.appName.capitalized)") {
-                            Task {
-                                await coordinator.startRecording(
-                                    trigger: .meetingPrompt,
-                                    meeting: meeting)
+                        Menu("Record \(meeting.appName.capitalized)") {
+                            ForEach(RecordingAudioMode.allCases) { mode in
+                                Button(mode.displayName) {
+                                    Task {
+                                        await coordinator.startRecording(
+                                            trigger: .meetingPrompt,
+                                            meeting: meeting,
+                                            audioMode: mode)
+                                    }
+                                }
                             }
                         }
                     }

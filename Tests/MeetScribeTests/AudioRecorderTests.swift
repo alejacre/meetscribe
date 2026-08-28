@@ -86,6 +86,13 @@ final class AudioRecorderTests: XCTestCase {
     }
 
     func testMixCreatesPrivateAudioFromAvailableTrack() async throws {
+        try await assertMixCreatesPrivateAudio(using: \.micURL)
+        try await assertMixCreatesPrivateAudio(using: \.systemURL)
+    }
+
+    private func assertMixCreatesPrivateAudio(
+        using track: KeyPath<RecordingSession, URL>
+    ) async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(
                 "meetscribe-audio-mix-\(UUID().uuidString)",
@@ -96,7 +103,7 @@ final class AudioRecorderTests: XCTestCase {
             start: Date(),
             appName: nil)
         try session.createFolder()
-        try writeSilentM4A(to: session.micURL)
+        try writeSilentM4A(to: session[keyPath: track])
 
         try await AudioRecorder.mix(session: session)
 
