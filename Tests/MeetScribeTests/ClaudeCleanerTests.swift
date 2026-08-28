@@ -39,6 +39,54 @@ final class ClaudeCleanerTests: XCTestCase {
         XCTAssertTrue(ClaudeCleaner.structurallyValid(original: original, cleaned: cleaned))
     }
 
+    func testStructuralValidationAcceptsTwoRecognizableTokensInShortTurn() {
+        let context = "We reviewed launch migration rollback monitoring ownership testing "
+            + "documentation staffing timing support readiness dependencies risks customer "
+            + "communications approvals metrics dashboards escalation training and operations."
+        let original = transcript("""
+        [00:00:01] **Me:** if you get an AMRA and
+        [00:00:02] **Them:** \(context)
+        """)
+        let cleaned = cleanedTranscript("""
+        [00:00:01] **Me:** with Amra, and
+        [00:00:02] **Them:** \(context)
+        """)
+
+        XCTAssertTrue(ClaudeCleaner.structurallyValid(original: original, cleaned: cleaned))
+    }
+
+    func testStructuralValidationAcceptsHalfOfTwoTokenTurn() {
+        let context = "We reviewed launch migration rollback monitoring ownership testing "
+            + "documentation staffing timing support readiness dependencies risks customer "
+            + "communications approvals metrics dashboards escalation training and operations."
+        let original = transcript("""
+        [00:00:01] **Me:** Nothing? Yeah.
+        [00:00:02] **Them:** \(context)
+        """)
+        let cleaned = cleanedTranscript("""
+        [00:00:01] **Me:** Yeah.
+        [00:00:02] **Them:** \(context)
+        """)
+
+        XCTAssertTrue(ClaudeCleaner.structurallyValid(original: original, cleaned: cleaned))
+    }
+
+    func testStructuralValidationRejectsOnlyOneRecognizableTokenInShortTurn() {
+        let context = "We reviewed launch migration rollback monitoring ownership testing "
+            + "documentation staffing timing support readiness dependencies risks customer "
+            + "communications approvals metrics dashboards escalation training and operations."
+        let original = transcript("""
+        [00:00:01] **Me:** Yeah, not the deal.
+        [00:00:02] **Them:** \(context)
+        """)
+        let cleaned = cleanedTranscript("""
+        [00:00:01] **Me:** Yeah, ideal.
+        [00:00:02] **Them:** \(context)
+        """)
+
+        XCTAssertFalse(ClaudeCleaner.structurallyValid(original: original, cleaned: cleaned))
+    }
+
     func testStructuralValidationRejectsDroppedTurn() {
         let original = transcript("""
         [00:00:01] **Me:** Hello.

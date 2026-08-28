@@ -14,6 +14,10 @@ enum TranscriptProcessorSupport {
     static let standardTimeout: TimeInterval = 300
     static let longTranscriptTimeout: TimeInterval = 900
     static let longTranscriptThreshold = 50_000
+    static let minimumGlobalTokenRetentionPercent = 85
+    static let minimumTurnTokenRetentionPercent = 50
+    static let shortTurnTokenLimit = 6
+    static let minimumShortTurnTokenOverlap = 2
 
     static let defaultPrompt = """
         You are a transcript editor. Clean up the meeting transcript below: fix punctuation and casing, \
@@ -75,7 +79,7 @@ enum TranscriptProcessorSupport {
             return false
         }
         guard tokenOverlap(originalTokens, processedTokens) * 100
-            >= originalTokens.count * 85
+            >= originalTokens.count * minimumGlobalTokenRetentionPercent
         else {
             return false
         }
@@ -83,8 +87,15 @@ enum TranscriptProcessorSupport {
             guard !originalTurn.tokens.isEmpty else {
                 return processedTurn.tokens.isEmpty
             }
-            return tokenOverlap(originalTurn.tokens, processedTurn.tokens) * 100
-                >= originalTurn.tokens.count * 60
+            let overlap = tokenOverlap(originalTurn.tokens, processedTurn.tokens)
+            if originalTurn.tokens.count <= shortTurnTokenLimit {
+                let halfRoundedUp = (originalTurn.tokens.count + 1) / 2
+                return overlap >= min(
+                    halfRoundedUp,
+                    minimumShortTurnTokenOverlap)
+            }
+            return overlap * 100
+                >= originalTurn.tokens.count * minimumTurnTokenRetentionPercent
         }
     }
 
