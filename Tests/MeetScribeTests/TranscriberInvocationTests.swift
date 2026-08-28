@@ -1,4 +1,5 @@
 import XCTest
+import AVFoundation
 @testable import MeetScribe
 
 final class TranscriberInvocationTests: XCTestCase {
@@ -132,6 +133,39 @@ final class TranscriberInvocationTests: XCTestCase {
         XCTAssertEqual(calls.components(separatedBy: "CALL:").count - 1, 1)
     }
 
+    func testSilentTrackIsSkippedWhileAudibleTrackIsTranscribed() throws {
+        let root = try temporaryDirectory("silent-track")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let log = root.appendingPathComponent("calls.log")
+        let executable = try makeFakeWhisper(root: root, log: log)
+        let mic = root.appendingPathComponent("mic.m4a")
+        let system = root.appendingPathComponent("system.m4a")
+        try writeM4A(to: mic, amplitude: 0)
+        try writeM4A(to: system, amplitude: 0.002)
+
+        let tracks = try Transcriber(
+            mlxWhisperPath: executable.path,
+            model: "test/model",
+            modelResolver: { _ in "locked-test-model" })
+            .transcribe(mic: mic, system: system)
+
+        XCTAssertTrue(tracks.mic.isEmpty)
+        XCTAssertEqual(tracks.system.first?.text, "system")
+        let calls = try String(contentsOf: log, encoding: .utf8)
+        XCTAssertEqual(calls.components(separatedBy: "CALL:").count - 1, 1)
+        XCTAssertFalse(calls.contains("CALL:\(mic.path)"))
+        XCTAssertTrue(calls.contains("CALL:\(system.path)"))
+    }
+
+    func testUnreadableExistingTrackStillUsesWhisperForDiagnostics() throws {
+        let root = try temporaryDirectory("unreadable-track")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let audio = root.appendingPathComponent("broken.m4a")
+        try Data("not audio".utf8).write(to: audio)
+
+        XCTAssertTrue(Transcriber.containsAudibleAudio(audio))
+    }
+
     func testRejectsAudioWhenLockedModelIsMissing() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("meetscribe-transcriber-\(UUID().uuidString)", isDirectory: true)
@@ -202,5 +236,33 @@ final class TranscriberInvocationTests: XCTestCase {
             [.posixPermissions: NSNumber(value: Int16(0o700))],
             ofItemAtPath: executable.path)
         return executable
+    }
+
+    private func writeM4A(to url: URL, amplitude: Float) throws {
+        let sampleRate = 48_000.0
+        let format = try XCTUnwrap(
+            AVAudioFormat(
+                standardFormatWithSampleRate: sampleRate,
+                channels: 1))
+        let file = try AVAudioFile(
+            forWriting: url,
+            settings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: sampleRate,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderBitRateKey: 64_000,
+            ],
+            commonFormat: format.commonFormat,
+            interleaved: format.isInterleaved)
+        let buffer = try XCTUnwrap(
+            AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(sampleRate / 10)))
+        buffer.frameLength = buffer.frameCapacity
+        let channel = try XCTUnwrap(buffer.floatChannelData?.pointee)
+        channel.initialize(
+            repeating: amplitude,
+            count: Int(buffer.frameLength))
+        try file.write(from: buffer)
     }
 }

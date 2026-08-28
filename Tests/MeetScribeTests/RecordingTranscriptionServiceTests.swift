@@ -164,13 +164,64 @@ final class RecordingTranscriptionServiceTests: XCTestCase {
             encoding: .utf8)
         let manifest = try RecordingManifestStore.load(
             from: result.finalSession.manifestURL)
-        XCTAssertEqual(result.finalSession.basename, session.basename)
+        XCTAssertEqual(result.finalSession.basename, "2026-04-24-raw-words")
         XCTAssertEqual(
             result.processingWarning,
             CommandTranscriptProcessor.ProcessorError.missingTopic.errorDescription)
         XCTAssertTrue(markdown.contains("Raw words"))
         XCTAssertFalse(markdown.contains("## Summary"))
         XCTAssertNil(manifest.transcript?.processorID)
+    }
+
+    func testRunUsesLocalTopicWhenAgentIsDisabled() throws {
+        let root = try temporaryDirectory("transcription-local-topic")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = RecordingSession(
+            root: root,
+            start: Date(timeIntervalSince1970: 1_777_003_200),
+            appName: "zoom")
+        try session.createFolder()
+        let tracks = RecordingTrackTranscriber { _, _ in
+            TranscriptionTracks(
+                mic: [],
+                system: [
+                    WhisperSegment(start: 0, end: 1, text: "Review the fee cycle."),
+                    WhisperSegment(start: 2, end: 3, text: "The fee cycle changed."),
+                ])
+        }
+
+        let result = try RecordingTranscriptionService.run(
+            session: session,
+            configuration: RecordingTranscriptionConfiguration(
+                mlxWhisperPath: "/unused",
+                whisperModel: "test/model",
+                agentConfiguration: .disabled),
+            trackTranscriber: tracks)
+
+        XCTAssertEqual(result.finalSession.basename, "2026-04-24-fee-cycle")
+        XCTAssertNil(result.processorID)
+    }
+
+    func testRunKeepsGenericNameForEmptyTranscript() throws {
+        let root = try temporaryDirectory("transcription-empty-topic")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = RecordingSession(
+            root: root,
+            start: Date(timeIntervalSince1970: 1_777_003_200),
+            appName: "zoom")
+        try session.createFolder()
+
+        let result = try RecordingTranscriptionService.run(
+            session: session,
+            configuration: RecordingTranscriptionConfiguration(
+                mlxWhisperPath: "/unused",
+                whisperModel: "test/model",
+                agentConfiguration: .disabled),
+            trackTranscriber: RecordingTrackTranscriber { _, _ in
+                TranscriptionTracks(mic: [], system: [])
+            })
+
+        XCTAssertEqual(result.finalSession.basename, session.basename)
     }
 
     func testRunKeepsRawTranscriptWhenFinalRenameFails() throws {

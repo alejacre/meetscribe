@@ -98,6 +98,10 @@ enum RecordingTranscriptionService {
         try session.secureFile(session.transcriptMD)
 
         var finalNote = session.noteURL
+        var finalMarkdown = markdown
+        var topicSlug = TranscriptTopicSuggester.slug(
+            mic: rawMic,
+            system: system)
         var processingWarning: String?
         var processorID: String?
         if let processor = TranscriptProcessorFactory.make(
@@ -105,22 +109,34 @@ enum RecordingTranscriptionService {
         {
             do {
                 if let result = try processor.process(markdown) {
-                    let processedMarkdown = TranscriptFormatter.markProcessed(
+                    finalMarkdown = TranscriptFormatter.markProcessed(
                         result.markdown,
                         by: processor.id)
-                    finalNote = try finalizer.move(session, result.topicSlug)
-                    try processedMarkdown.write(
-                        to: finalNote,
-                        atomically: true,
-                        encoding: .utf8)
-                    let processedSession = RecordingSession(
-                        existingNote: finalNote,
-                        start: session.start)
-                    try processedSession.secureFile(finalNote)
+                    topicSlug = result.topicSlug
                     processorID = processor.id
                 }
             } catch {
                 processingWarning = error.localizedDescription
+            }
+        }
+
+        if let topicSlug {
+            do {
+                finalNote = try finalizer.move(session, topicSlug)
+                try finalMarkdown.write(
+                    to: finalNote,
+                    atomically: true,
+                    encoding: .utf8)
+                try RecordingSession(
+                    existingNote: finalNote,
+                    start: session.start)
+                    .secureFile(finalNote)
+            } catch {
+                processingWarning = [processingWarning, error.localizedDescription]
+                    .compactMap { $0 }
+                    .joined(separator: " ")
+                finalNote = session.noteURL
+                processorID = nil
             }
         }
 

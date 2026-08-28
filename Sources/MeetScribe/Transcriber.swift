@@ -1,4 +1,6 @@
 import Foundation
+import AVFoundation
+import Accelerate
 
 struct TranscriptionTracks: Sendable {
     let mic: [WhisperSegment]
@@ -13,6 +15,7 @@ struct Transcriber {
 
     static let allowedLanguages: Set<String> = ["en", "es"]
     static let fallbackLanguage = "en"
+    static let audibleTrackRMSThreshold: Float = 0.001
 
     let mlxWhisperPath: String
     let model: String
@@ -62,6 +65,9 @@ struct Transcriber {
         guard FileManager.default.fileExists(atPath: audio.path) else {
             return DetectedTranscript(segments: [], language: nil)
         }
+        guard Self.containsAudibleAudio(audio) else {
+            return DetectedTranscript(segments: [], language: nil)
+        }
         guard let modelPath = modelResolver(model) else {
             throw TranscriberError.modelNotCached(model)
         }
@@ -81,6 +87,64 @@ struct Transcriber {
         let jsonURL = dir.appendingPathComponent(name + ".json")
         defer { try? FileManager.default.removeItem(at: jsonURL) }
         return try Self.parseTranscript(Data(contentsOf: jsonURL))
+    }
+
+    /// Avoids an mlx-whisper 0.4.3 pathological case where a long, all-silent
+    /// track can keep Metal saturated without producing output. If AVFoundation
+    /// cannot inspect the file, preserve the existing behavior and let Whisper
+    /// report the input error.
+    static func containsAudibleAudio(_ audio: URL) -> Bool {
+        guard let file = try? AVAudioFile(forReading: audio),
+              let buffer = AVAudioPCMBuffer(
+                pcmFormat: file.processingFormat,
+                frameCapacity: 16_384)
+        else {
+            return true
+        }
+
+        while file.framePosition < file.length {
+            do {
+                try file.read(into: buffer)
+            } catch {
+                return true
+            }
+            guard buffer.frameLength > 0 else { break }
+            if Self.isAudibleForTranscription(buffer) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func isAudibleForTranscription(
+        _ buffer: AVAudioPCMBuffer
+    ) -> Bool {
+        guard buffer.format.commonFormat == .pcmFormatFloat32,
+              let channels = buffer.floatChannelData
+        else {
+            return true
+        }
+
+        let frameCount = Int(buffer.frameLength)
+        let channelCount = Int(buffer.format.channelCount)
+        let sampleCount = buffer.format.isInterleaved
+            ? frameCount * channelCount
+            : frameCount
+        let bufferCount = buffer.format.isInterleaved ? 1 : channelCount
+        guard sampleCount > 0, bufferCount > 0 else { return false }
+
+        for channel in 0..<bufferCount {
+            var rms: Float = 0
+            vDSP_rmsqv(
+                channels[channel],
+                1,
+                &rms,
+                vDSP_Length(sampleCount))
+            if rms >= audibleTrackRMSThreshold {
+                return true
+            }
+        }
+        return false
     }
 
     /// Decoder flags that stop Whisper from hallucinating on quiet tracks. The mic track
